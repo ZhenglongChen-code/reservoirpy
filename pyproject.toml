@@ -1,0 +1,23 @@
+[project]
+name = "reservoirpy"
+version = "0.1.0"
+description = "Lightweight reservoir simulator"
+readme = "README.md"
+authors = [{ name = "Zhenglong Chen", email = "chenzhenglomg0514@163.com" }]
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "jupyter",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

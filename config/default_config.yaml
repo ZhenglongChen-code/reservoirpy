@@ -1,0 +1,85 @@
+# 油藏数值模拟器默认配置文件
+
+# 网格配置
+mesh:
+  nx: 20                    # X方向单元数
+  ny: 20                    # Y方向单元数
+  nz: 1                     # Z方向单元数
+  dx: 10.0                  # X方向单元尺寸 (m)
+  dy: 10.0                  # Y方向单元尺寸 (m)
+  dz: 5.0                   # Z方向单元尺寸 (m)
+
+# 物理属性配置
+physics:
+  # 渗透率 (mD)
+  permeability: 100
+  
+  # 孔隙度
+
+  porosity: 0.2
+  
+  # 流体粘度 (Pa·s)
+  viscosity: 0.001
+  
+  # 压缩系数 (1/Pa)
+  compressibility: 1e-9
+  
+  # 参考压力 (Pa)
+  reference_pressure: 0.0
+
+# 井配置
+wells:
+  - location: [5, 5, 0]     # 井位置 (i, j, k)
+    control_type: "rate"    # 控制类型: "rate" 或 "bhp"
+    value: 0.001            # 控制值 (m³/s 或 Pa)
+    rw: 0.05                # 井筒半径 (m)
+  - location: [15, 15, 0]
+    control_type: "bhp"
+    value: 1e6
+    rw: 0.05
+
+# 模拟配置
+simulation:
+  dt: 86400                 # 时间步长 (s)
+  total_time: 31536000      # 总时间 (s)
+  output_interval: 10       # 输出间隔
+  initial_pressure: 30e6    # 初始压力 (Pa)
+
+# 线性求解器配置
+linear_solver:
+  method: "bicgstab"        # 求解器方法: "bicgstab", "gmres", "direct"
+  tolerance: 1e-8           # 收敛容差
+  max_iterations: 1000      # 最大迭代次数
+
+# 可视化配置
+visualization:
+  output_dir: "results"     # 输出目录
+  save_plots: true          # 保存图片
+  save_animation: false     # 保存动画
+  plot_format: "png"        # 图片格式: "png", "pdf", "svg"
+
+# 两相流配置（可选）
+two_phase:
+  # 油相粘度 (Pa·s)
+  oil_viscosity: 2e-3
+  
+  # 水相粘度 (Pa·s)
+  water_viscosity: 1e-3
+  
+  # 相对渗透率模型
+  kro_model: "corey"
+  krw_model: "corey"
+  
+  # 毛管压力模型
+  pc_model: "brooks_corey"
+  
+  # 模型参数
+  kro_params:
+    n_o: 2.0                # 油相指数
+    S_or: 0.2               # 残余油饱和度
+  krw_params:
+    n_w: 2.0                # 水相指数
+    S_wr: 0.2               # 残余水饱和度
+  pc_params:
+    P_c0: 1000.0            # 毛管压力常数 (Pa)
+    lambda: 2.0              # 毛管压力指数
