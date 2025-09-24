@@ -5,9 +5,9 @@
 """
 
 import numpy as np
-from typing import Dict, Any, Tuple, List, Optional
-from ..core.mesh import StructuredMesh
-from ..core.physics import SinglePhaseProperties
+from typing import Dict, Any, List
+from reservoirpy.mesh.mesh import StructuredMesh
+from reservoirpy.physics.physics import SinglePhaseProperties
 from ..core.discretization import FVMDiscretizer
 from ..core.well_model import WellManager
 from ..core.linear_solver import LinearSolver
@@ -156,8 +156,8 @@ def create_single_phase_solver(config: Dict[str, Any]) -> SinglePhaseSolver:
     Returns:
         单相流求解器实例
     """
-    from ..core.mesh import StructuredMesh
-    from ..core.physics import SinglePhaseProperties
+    from reservoirpy.mesh.mesh import StructuredMesh
+    from reservoirpy.physics.physics import SinglePhaseProperties
     
     # 创建网格
     mesh_config = config['mesh']

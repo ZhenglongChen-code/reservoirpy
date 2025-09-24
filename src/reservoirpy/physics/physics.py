@@ -5,8 +5,8 @@
 """
 
 import numpy as np
-from typing import Dict, Any, Union, Optional
-from .mesh import StructuredMesh
+from typing import Dict, Any
+from reservoirpy.mesh.mesh import StructuredMesh
 
 
 class SinglePhaseProperties:

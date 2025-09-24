@@ -6,12 +6,12 @@
 
 import numpy as np
 from typing import Dict, Any, Tuple, List
-from scipy.sparse import csr_matrix, csc_matrix
+from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve, cg, bicgstab
 import warnings
 
-from .mesh import StructuredMesh, CubeCell
-from .physics import SinglePhaseProperties
+from reservoirpy.mesh.mesh import StructuredMesh, CubeCell
+from reservoirpy.physics.physics import SinglePhaseProperties
 from .well_model import WellManager
 
 

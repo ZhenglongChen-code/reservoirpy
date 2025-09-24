@@ -5,8 +5,8 @@
 
 import numpy as np
 import math
-from typing import Dict, Any, List, Tuple, Optional
-from .mesh import StructuredMesh
+from typing import Dict, Any, List
+from reservoirpy.mesh.mesh import StructuredMesh
 
 
 class Well:

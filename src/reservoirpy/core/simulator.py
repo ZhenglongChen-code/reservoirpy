@@ -7,8 +7,8 @@
 import yaml
 import numpy as np
 from typing import Dict, Any, Optional, List, Union
-from .mesh import StructuredMesh
-from .physics import SinglePhaseProperties, TwoPhaseProperties
+from reservoirpy.mesh.mesh import StructuredMesh
+from reservoirpy.physics.physics import SinglePhaseProperties
 from .discretization import FVMDiscretizer
 from .well_model import WellManager
 

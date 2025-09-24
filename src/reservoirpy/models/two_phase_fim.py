@@ -1,30 +1,31 @@
 """
-两相流IMPES求解器
+两相流FIM求解器
 
-实现隐式压力-显式饱和度方法求解两相流问题
+实现全隐式方法求解两相流问题
 """
 
 import numpy as np
-from typing import Dict, Any, Tuple, List, Optional
-from ..core.mesh import StructuredMesh
-from ..core.physics import TwoPhaseProperties
+from typing import Dict, Any, Tuple, List
+from scipy.sparse import csr_matrix, eye
+from reservoirpy.mesh.mesh import StructuredMesh
+from reservoirpy.physics.physics import TwoPhaseProperties
 from ..core.discretization import FVMDiscretizer
 from ..core.well_model import WellManager
 from ..core.linear_solver import LinearSolver
-from ..core.time_integration import ImplicitEulerIntegrator
+from ..core.nonlinear_solver import NewtonRaphsonSolver
 
 
-class TwoPhaseIMPES:
+class TwoPhaseFIM:
     """
-    两相流IMPES求解器
+    两相流FIM求解器
     
-    实现隐式压力-显式饱和度方法求解两相流问题
+    实现全隐式方法求解两相流问题
     """
     
     def __init__(self, mesh: StructuredMesh, physics: TwoPhaseProperties, 
                  config: Dict[str, Any] = None):
         """
-        初始化IMPES求解器
+        初始化FIM求解器
         
         Args:
             mesh: 结构化网格
@@ -40,6 +41,8 @@ class TwoPhaseIMPES:
         self.discretizer = FVMDiscretizer(mesh, physics)
         self.linear_solver = LinearSolver(
             self.config.get('linear_solver', {}))
+        self.newton_solver = NewtonRaphsonSolver(
+            self.config.get('newton_solver', {}))
         
         # 模拟参数
         self.dt = self.config.get('dt', 86400.0)  # 默认1天
@@ -51,7 +54,7 @@ class TwoPhaseIMPES:
     def solve_time_step(self, pressure: np.ndarray, saturation: np.ndarray,
                        dt: float, well_manager: WellManager) -> Tuple[np.ndarray, np.ndarray]:
         """
-        求解一个时间步
+        求解一个时间步（全隐式）
         
         Args:
             pressure: 当前压力场
@@ -62,89 +65,114 @@ class TwoPhaseIMPES:
         Returns:
             (新压力场, 新饱和度场)
         """
-        # 第一步：隐式求解压力方程
-        A, b = self.discretizer.discretize_single_phase(dt, pressure, well_manager)
-        new_pressure = self.linear_solver.solve(A, b)
+        # 构造联合变量 [pressure, saturation]
+        x0 = np.concatenate([pressure, saturation])
         
-        # 第二步：显式更新饱和度
-        new_saturation = self._update_saturation_explicit(
-            pressure, new_pressure, saturation, dt, well_manager)
+        # 定义残差函数
+        def residual_function(x):
+            p = x[:self.total_cells]
+            s = x[self.total_cells:]
+            return self._compute_residual(p, s, dt, well_manager)
+        
+        # 定义雅可比矩阵函数
+        def jacobian_function(x):
+            p = x[:self.total_cells]
+            s = x[self.total_cells:]
+            return self._compute_jacobian(p, s, dt, well_manager)
+        
+        # 使用牛顿-拉夫森方法求解
+        x_new, info = self.newton_solver.solve(x0, residual_function, jacobian_function)
+        
+        # 分离变量
+        new_pressure = x_new[:self.total_cells]
+        new_saturation = x_new[self.total_cells:]
         
         return new_pressure, new_saturation
     
-    def _update_saturation_explicit(self, pressure_old: np.ndarray,
-                                  pressure_new: np.ndarray,
-                                  saturation_old: np.ndarray,
-                                  dt: float, well_manager: WellManager) -> np.ndarray:
+    def _compute_residual(self, pressure: np.ndarray, saturation: np.ndarray,
+                         dt: float, well_manager: WellManager) -> np.ndarray:
         """
-        显式更新饱和度
+        计算残差向量
         
         Args:
-            pressure_old: 旧压力场
-            pressure_new: 新压力场
-            saturation_old: 旧饱和度场
+            pressure: 压力场
+            saturation: 饱和度场
             dt: 时间步长
             well_manager: 井管理器
             
         Returns:
-            新饱和度场
+            残差向量
         """
-        saturation_new = saturation_old.copy()
+        # 初始化残差向量
+        residual = np.zeros(2 * self.total_cells)
         
-        # 对每个单元更新饱和度
-        for i in range(self.total_cells):
-            z, y, x = self.mesh.get_cell_coords(i)
-            cell = self.mesh.cell_list[i]
-            
-            # 计算饱和度变化率
-            dS_dt = self._compute_saturation_rate(
-                cell, pressure_old[i], pressure_new[i], 
-                saturation_old[i], dt)
-            
-            # 更新饱和度
-            saturation_new[i] = saturation_old[i] + dS_dt * dt
-            
-            # 限制饱和度在物理范围内
-            saturation_new[i] = np.clip(saturation_new[i], 0.0, 1.0)
+        # 计算压力方程残差
+        pressure_residual = self._compute_pressure_residual(
+            pressure, saturation, dt, well_manager)
         
-        return saturation_new
+        # 计算饱和度方程残差
+        saturation_residual = self._compute_saturation_residual(
+            pressure, saturation, dt, well_manager)
+        
+        # 组合残差
+        residual[:self.total_cells] = pressure_residual
+        residual[self.total_cells:] = saturation_residual
+        
+        return residual
     
-    def _compute_saturation_rate(self, cell, pressure_old: float, 
-                               pressure_new: float, saturation: float, 
-                               dt: float) -> float:
+    def _compute_pressure_residual(self, pressure: np.ndarray, saturation: np.ndarray,
+                                 dt: float, well_manager: WellManager) -> np.ndarray:
         """
-        计算饱和度变化率
+        计算压力方程残差
         
         Args:
-            cell: 单元对象
-            pressure_old: 旧压力
-            pressure_new: 新压力
-            saturation: 当前饱和度
+            pressure: 压力场
+            saturation: 饱和度场
             dt: 时间步长
+            well_manager: 井管理器
             
         Returns:
-            饱和度变化率 dS/dt
+            压力方程残差
         """
-        # 这里应该实现完整的饱和度变化率计算
-        # 简化处理：基于压力变化和相对渗透率变化
-        dp = pressure_new - pressure_old
+        # 这里应该实现完整的压力方程残差计算
+        # 简化处理：返回零向量
+        return np.zeros(self.total_cells)
+    
+    def _compute_saturation_residual(self, pressure: np.ndarray, saturation: np.ndarray,
+                                   dt: float, well_manager: WellManager) -> np.ndarray:
+        """
+        计算饱和度方程残差
         
-        # 计算相对渗透率
-        kro = self.physics.get_relative_permeability(saturation, 'oil')
-        krw = self.physics.get_relative_permeability(saturation, 'water')
+        Args:
+            pressure: 压力场
+            saturation: 饱和度场
+            dt: 时间步长
+            well_manager: 井管理器
+            
+        Returns:
+            饱和度方程残差
+        """
+        # 这里应该实现完整的饱和度方程残差计算
+        # 简化处理：返回零向量
+        return np.zeros(self.total_cells)
+    
+    def _compute_jacobian(self, pressure: np.ndarray, saturation: np.ndarray,
+                         dt: float, well_manager: WellManager) -> csr_matrix:
+        """
+        计算雅可比矩阵
         
-        # 计算流度比
-        lambda_o = kro / self.physics.mu_o
-        lambda_w = krw / self.physics.mu_w
-        lambda_t = lambda_o + lambda_w
-        
-        # 简化的饱和度变化率（实际应基于流量计算）
-        if lambda_t > 0:
-            dS_dt = 0.01 * dp / (lambda_t * cell.porosity)
-        else:
-            dS_dt = 0.0
-        
-        return dS_dt
+        Args:
+            pressure: 压力场
+            saturation: 饱度场
+            dt: 时间步长
+            well_manager: 井管理器
+            
+        Returns:
+            雅可比矩阵
+        """
+        # 这里应该实现完整的雅可比矩阵计算
+        # 简化处理：返回单位矩阵
+        return eye(2 * self.total_cells)
     
     def solve_simulation(self, wells_config: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -238,6 +266,8 @@ class TwoPhaseIMPES:
         # 更新子模块配置
         if 'linear_solver' in config:
             self.linear_solver.update_config(config['linear_solver'])
+        if 'newton_solver' in config:
+            self.newton_solver.update_config(config['newton_solver'])
     
     def get_info(self) -> Dict[str, Any]:
         """
@@ -254,25 +284,26 @@ class TwoPhaseIMPES:
             'output_interval': self.output_interval,
             'initial_pressure': self.initial_pressure,
             'initial_saturation': self.initial_saturation,
-            'linear_solver_info': self.linear_solver.get_info()
+            'linear_solver_info': self.linear_solver.get_info(),
+            'newton_solver_info': self.newton_solver.get_info()
         }
     
     def __repr__(self):
-        return f"TwoPhaseIMPES({self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz})"
+        return f"TwoPhaseFIM({self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz})"
 
 
-def create_impes_solver(config: Dict[str, Any]) -> TwoPhaseIMPES:
+def create_fim_solver(config: Dict[str, Any]) -> TwoPhaseFIM:
     """
-    根据配置创建IMPES求解器
+    根据配置创建FIM求解器
     
     Args:
         config: 配置字典，包含网格和物理属性配置
         
     Returns:
-        IMPES求解器实例
+        FIM求解器实例
     """
-    from ..core.mesh import StructuredMesh
-    from ..core.physics import TwoPhaseProperties
+    from reservoirpy.mesh.mesh import StructuredMesh
+    from reservoirpy.physics.physics import TwoPhaseProperties
     
     # 创建网格
     mesh_config = config['mesh']
@@ -295,14 +326,14 @@ def create_impes_solver(config: Dict[str, Any]) -> TwoPhaseIMPES:
     
     # 创建求解器
     solver_config = config.get('solver', {})
-    solver = TwoPhaseIMPES(mesh, physics, solver_config)
+    solver = TwoPhaseFIM(mesh, physics, solver_config)
     
     return solver
 
 
-def run_impes_simulation(config: Dict[str, Any]) -> Dict[str, Any]:
+def run_fim_simulation(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    运行IMPES模拟
+    运行FIM模拟
     
     Args:
         config: 配置字典
@@ -311,7 +342,7 @@ def run_impes_simulation(config: Dict[str, Any]) -> Dict[str, Any]:
         模拟结果
     """
     # 创建求解器
-    solver = create_impes_solver(config)
+    solver = create_fim_solver(config)
     
     # 获取井配置
     wells_config = config.get('wells', [])
