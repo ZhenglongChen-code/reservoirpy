@@ -64,7 +64,7 @@ class SinglePhaseSolver:
             self.physics.permeability, self.physics.viscosity)
         
         # 设置初始压力场
-        pressure = np.full(self.mesh.ncell, self.initial_pressure)
+        pressure = np.full(self.mesh.n_cells, self.initial_pressure)
         
         # 更新单元压力
         for i, cell in enumerate(self.mesh.cell_list):
@@ -95,7 +95,7 @@ class SinglePhaseSolver:
             self.physics.permeability, self.physics.viscosity)
         
         # 设置初始压力场
-        initial_pressure = np.full(self.mesh.ncell, self.initial_pressure)
+        initial_pressure = np.full(self.mesh.n_cells, self.initial_pressure)
         
         # 更新单元压力
         for i, cell in enumerate(self.mesh.cell_list):
@@ -134,7 +134,7 @@ class SinglePhaseSolver:
         """
         return {
             'mesh_size': self.mesh.grid_shape,
-            'total_cells': self.mesh.ncell,
+            'total_cells': self.mesh.n_cells,
             'dt': self.dt,
             'total_time': self.total_time,
             'output_interval': self.output_interval,

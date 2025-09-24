@@ -254,7 +254,7 @@ def check_mass_conservation(pressure_field: np.ndarray,
     total_outflow = 0.0
     
     # 对每个单元计算质量变化
-    for i in range(mesh.ncell):
+    for i in range(mesh.n_cells):
         z, y, x = mesh.get_cell_coords(i)
         cell = mesh.cell_list[i]
         
@@ -317,7 +317,7 @@ def check_numerical_stability(mesh, physics, dt: float) -> Dict[str, Union[bool,
     max_cfl = 0.0
     stable = True
     
-    for i in range(mesh.ncell):
+    for i in range(mesh.n_cells):
         z, y, x = mesh.get_cell_coords(i)
         cell = mesh.cell_list[i]
         

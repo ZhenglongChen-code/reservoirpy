@@ -5,8 +5,104 @@
 """
 
 import numpy as np
-import torch
 from typing import Tuple, List, Optional, Union
+from abc import ABC, abstractmethod
+
+
+class BaseMesh(ABC):
+    """
+    网格基类
+    
+    定义网格类的基本接口，为结构化和非结构化网格提供统一的抽象。
+    """
+    
+    def __init__(self):
+        """初始化网格基类"""
+        self.n_cells = 0
+        self.node_list = []
+        self.cell_list = []
+    
+    @abstractmethod
+    def get_cell_volume(self, cell_index: int) -> float:
+        """
+        获取单元体积
+        
+        Args:
+            cell_index: 单元索引
+            
+        Returns:
+            单元体积
+        """
+        pass
+    
+    @abstractmethod
+    def get_face_area(self, face_index: int) -> float:
+        """
+        获取界面面积
+        
+        Args:
+            face_index: 界面索引
+            
+        Returns:
+            界面面积
+        """
+        pass
+    
+    @abstractmethod
+    def get_neighbors(self, cell_index: int) -> List[int]:
+        """
+        获取相邻单元索引
+        
+        Args:
+            cell_index: 单元索引
+            
+        Returns:
+            相邻单元索引列表
+        """
+        pass
+    
+    @abstractmethod
+    def is_boundary_cell(self, cell_index: int) -> bool:
+        """
+        判断是否为边界单元
+        
+        Args:
+            cell_index: 单元索引
+            
+        Returns:
+            是否为边界单元
+        """
+        pass
+    
+    @property
+    @abstractmethod
+    def total_cells(self) -> int:
+        """总单元数"""
+        pass
+    
+    def get_cell_centers(self) -> np.ndarray:
+        """
+        获取所有单元中心坐标
+        
+        Returns:
+            形状为 (ncell, 3) 的数组，每行为 [x, y, z]
+        """
+        centers = np.zeros((self.total_cells, 3))
+        for i, cell in enumerate(self.cell_list):
+            centers[i] = cell.center
+        return centers
+    
+    def get_cell_volumes(self) -> np.ndarray:
+        """
+        获取所有单元体积
+        
+        Returns:
+            形状为 (ncell,) 的数组
+        """
+        volumes = np.zeros(self.total_cells)
+        for i, cell in enumerate(self.cell_list):
+            volumes[i] = cell.volume
+        return volumes
 
 
 class Node:
@@ -25,22 +121,25 @@ class Node:
             y: Y坐标  
             z: Z坐标
         """
+        self.x = x
+        self.y = y
+        self.z = z
         self.coord = [x, y, z]
     
     def __repr__(self):
         return f"Node({self.coord[0]:.2f}, {self.coord[1]:.2f}, {self.coord[2]:.2f})"
 
 
-class Cell:
+class BaseCell(ABC):
     """
-    网格单元类
+    网格单元基类
     
-    表示网格中的一个单元，包含几何和物理属性信息。
+    定义网格单元的基本接口，为不同类型的单元（如立方体、四面体等）提供统一的抽象。
     """
     
     def __init__(self, index: int, center: List[float], volume: float):
         """
-        初始化单元
+        初始化单元基类
         
         Args:
             index: 单元索引
@@ -50,20 +149,18 @@ class Cell:
         self.index = index
         self.center = center
         self.volume = volume
-        self.neighbors = [-1] * 6  # W, E, N, S, F, B
+        self.neighbors = []  # 邻居列表，大小取决于单元类型
         self.boundary_type = None
         
         # 几何属性
-        self.dx = 0.0
-        self.dy = 0.0
-        self.dz = 0.0
+        self.vertices = []  # 顶点列表，大小取决于单元类型
         
         # 物理属性（将在physics模块中设置）
         self.porosity = 0.0
         self.kx = 0.0
         self.ky = 0.0
         self.kz = 0.0
-        self.trans = [0.0] * 6  # 传导率
+        self.trans = []  # 传导率列表，大小取决于单元类型
         
         # 边界和井条件
         self.mark_bc = 0
@@ -80,11 +177,66 @@ class Cell:
         self.krw_div_mu_w = 0.0
         self.sum_k_div_mu = 0.0
     
+    @abstractmethod
+    def get_face_count(self) -> int:
+        """
+        获取单元的面数
+        
+        Returns:
+            面单数
+        """
+        pass
+    
+    @abstractmethod
+    def get_vertex_count(self) -> int:
+        """
+        获取单元的顶点数
+        
+        Returns:
+            顶点数
+        """
+        pass
+
+
+class CubeCell(BaseCell):
+    """
+    结构化网格单元类（六面体）
+    
+    表示结构化网格中的一个六面体单元，包含几何和物理属性信息。
+    """
+    
+    def __init__(self, index: int, center: List[float], volume: float):
+        """
+        初始化六面体单元
+        
+        Args:
+            index: 单元索引
+            center: 单元中心坐标 [x, y, z]
+            volume: 单元体积
+        """
+        super().__init__(index, center, volume)
+        
+        # 为六面体单元初始化特定属性
+        self.neighbors = [-1] * 6  # W, E, N, S, F, B
+        self.vertices = [-1] * 8
+        self.trans = [0.0] * 6  # 6个面的传导率
+        self.dx = 0.0
+        self.dy = 0.0
+        self.dz = 0.0
+    
+    def get_face_count(self) -> int:
+        """获取六面体的面数"""
+        return 6
+    
+    def get_vertex_count(self) -> int:
+        """获取六面体的顶点数"""
+        return 8
+    
     def __repr__(self):
         return f"Cell({self.index}, center={self.center}, volume={self.volume:.2e})"
 
 
-class StructuredMesh:
+class StructuredMesh(BaseMesh):
     """
     结构化网格管理类
     
@@ -103,6 +255,7 @@ class StructuredMesh:
             dy: Y方向单元尺寸
             dz: Z方向单元尺寸
         """
+        super().__init__()
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -111,7 +264,7 @@ class StructuredMesh:
         self.dz = dz
         
         # 计算总单元数
-        self.ncell = nx * ny * nz
+        self.n_cells = nx * ny * nz
         
         # 构建网格
         self.node_list = self._generate_nodes()
@@ -134,7 +287,7 @@ class StructuredMesh:
                     nodes.append(Node(current_x, current_y, current_z))
         return nodes
     
-    def _generate_cells(self) -> List[Cell]:
+    def _generate_cells(self) -> List[CubeCell]:
         """
         生成网格单元
         
@@ -153,7 +306,7 @@ class StructuredMesh:
                     center_z = (i + 0.5) * self.dz
                     
                     # 创建单元
-                    cell = Cell(
+                    cell = CubeCell(
                         index=idx,
                         center=[center_x, center_y, center_z],
                         volume=self.dx * self.dy * self.dz
@@ -173,14 +326,18 @@ class StructuredMesh:
                     cell.neighbors[5] = idx + self.nx * self.ny if i < self.nz - 1 else -1  # Back
                     
                     # 设置顶点索引
-                    i0 = i * (self.ny + 1) * (self.nx + 1) + j * (self.nx + 1) + k
-                    i1 = i0 + 1
-                    i2 = i0 + (self.nx + 1)
-                    i3 = i2 + 1
-                    i4 = i0 + (self.nx + 1) * (self.ny + 1)
-                    i5 = i4 + 1
-                    i6 = i4 + (self.nx + 1)
-                    i7 = i6 + 1
+                    # PyVista/VTK六面体顶点顺序:
+                    # 底面 (按逆时针方向，从角落开始): 0, 1, 2, 3
+                    # 顶面 (按逆时针方向，从角落开始): 4, 5, 6, 7
+                    # 0-1-2-3 构成底面，4-5-6-7 构成顶面，且 0与4, 1与5 等垂直对齐
+                    i0 = i * (self.ny + 1) * (self.nx + 1) + j * (self.nx + 1) + k          # 0
+                    i1 = i * (self.ny + 1) * (self.nx + 1) + j * (self.nx + 1) + k + 1      # 1
+                    i2 = i * (self.ny + 1) * (self.nx + 1) + (j + 1) * (self.nx + 1) + k + 1  # 2
+                    i3 = i * (self.ny + 1) * (self.nx + 1) + (j + 1) * (self.nx + 1) + k      # 3
+                    i4 = (i + 1) * (self.ny + 1) * (self.nx + 1) + j * (self.nx + 1) + k      # 4
+                    i5 = (i + 1) * (self.ny + 1) * (self.nx + 1) + j * (self.nx + 1) + k + 1  # 5
+                    i6 = (i + 1) * (self.ny + 1) * (self.nx + 1) + (j + 1) * (self.nx + 1) + k + 1  # 6
+                    i7 = (i + 1) * (self.ny + 1) * (self.nx + 1) + (j + 1) * (self.nx + 1) + k      # 7
                     cell.vertices = [i0, i1, i2, i3, i4, i5, i6, i7]
                     
                     cells.append(cell)
@@ -314,39 +471,15 @@ class StructuredMesh:
     @property
     def total_cells(self) -> int:
         """总单元数"""
-        return self.ncell
+        return self.n_cells
     
     @property
     def grid_shape(self) -> Tuple[int, int, int]:
         """网格形状 (nx, ny, nz)"""
         return (self.nx, self.ny, self.nz)
     
-    def get_cell_centers(self) -> np.ndarray:
-        """
-        获取所有单元中心坐标
-        
-        Returns:
-            形状为 (ncell, 3) 的数组，每行为 [x, y, z]
-        """
-        centers = np.zeros((self.ncell, 3))
-        for i, cell in enumerate(self.cell_list):
-            centers[i] = cell.center
-        return centers
-    
-    def get_cell_volumes(self) -> np.ndarray:
-        """
-        获取所有单元体积
-        
-        Returns:
-            形状为 (ncell,) 的数组
-        """
-        volumes = np.zeros(self.ncell)
-        for i, cell in enumerate(self.cell_list):
-            volumes[i] = cell.volume
-        return volumes
-    
     def __repr__(self):
-        return f"StructuredMesh({self.nx}x{self.ny}x{self.nz}, cells={self.ncell})"
+        return f"StructuredMesh({self.nx}x{self.ny}x{self.nz}, cells={self.n_cells})"
 
 
 # 向后兼容的别名

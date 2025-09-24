@@ -10,7 +10,7 @@ from scipy.sparse import csr_matrix, csc_matrix
 from scipy.sparse.linalg import spsolve, cg, bicgstab
 import warnings
 
-from .mesh import StructuredMesh, Cell
+from .mesh import StructuredMesh, CubeCell
 from .physics import SinglePhaseProperties
 from .well_model import WellManager
 
@@ -92,7 +92,7 @@ class FVMDiscretizer:
         
         return transmissibility
     
-    def _get_permeability(self, cell: Cell, direction: int) -> float:
+    def _get_permeability(self, cell: CubeCell, direction: int) -> float:
         """
         获取指定方向的渗透率
         

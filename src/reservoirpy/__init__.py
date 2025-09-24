@@ -28,7 +28,7 @@ __author__ = "Reservoir Simulation Team"
 __email__ = "reservoir@example.com"
 
 # 导入主要类
-from .core.mesh import StructuredMesh, Cell, Node
+from .core.mesh import StructuredMesh, CubeCell, Node
 from .core.physics import SinglePhaseProperties, TwoPhaseProperties
 from .core.simulator import ReservoirSimulator
 from .core.well_model import Well, WellManager, create_well_from_config, validate_well_config
@@ -38,7 +38,7 @@ MeshGrid = StructuredMesh
 
 __all__ = [
     'StructuredMesh',
-    'Cell', 
+    'CubeCell',
     'Node',
     'SinglePhaseProperties',
     'TwoPhaseProperties',

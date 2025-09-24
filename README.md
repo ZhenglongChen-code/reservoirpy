@@ -29,37 +29,46 @@ pip install -e .[dev,viz]
 ## 🏗️ 项目结构
 
 ```
-reservoir_sim/
-├── __init__.py                 # 包初始化
+reservoirpy/
+├── src/
+│   └── reservoirpy/            # 油藏模拟器源代码
+│       ├── __init__.py         # 包初始化
+│       ├── core/               # 核心模块
+│       │   ├── __init__.py
+│       │   ├── mesh.py                 # 网格管理
+│       │   ├── physics.py              # 物理属性模型
+│       │   ├── discretization.py       # FVM离散化
+│       │   ├── time_integration.py     # 时间积分
+│       │   ├── linear_solver.py        # 线性求解器
+│       │   ├── nonlinear_solver.py     # 非线性求解器（两相流）
+│       │   ├── well_model.py           # 井模型
+│       │   └── simulator.py            # 主模拟器
+│       ├── solvers/                    # 求解器
+│       │   ├── __init__.py
+│       │   ├── single_phase.py         # 单相流求解器
+│       │   ├── two_phase_impes.py      # 两相流IMPES求解器
+│       │   └── two_phase_fim.py        # 两相流FIM求解器
+│       ├── visualization/              # 可视化模块
+│       │   ├── __init__.py
+│       │   ├── plot_2d.py              # 2D可视化
+│       │   ├── plot_3d.py              # 3D可视化
+│       │   └── animation.py            # 动画生成
+│       ├── utils/                      # 工具函数
+│       │   ├── __init__.py
+│       │   ├── io.py                   # 输入输出
+│       │   ├── units.py                # 单位转换
+│       │   └── validation.py           # 数据验证
+│       ├── physics/                    # 物理模型
+│       │   └── __init__.py
+│       └── main.py             # 主入口
 ├── config/                     # 配置文件
 │   ├── __init__.py
 │   ├── default_config.yaml     # 默认配置
 │   └── examples/               # 示例配置
-├── core/                       # 核心模块
-│   ├── __init__.py
-│   ├── mesh.py                 # 网格管理
-│   ├── physics.py              # 物理属性模型
-│   ├── discretization.py       # FVM离散化
-│   ├── time_integration.py     # 时间积分
-│   ├── linear_solver.py        # 线性求解器
-│   ├── nonlinear_solver.py     # 非线性求解器（两相流）
-│   ├── well_model.py           # 井模型
-│   └── simulator.py            # 主模拟器
-├── solvers/                    # 求解器
-│   ├── __init__.py
-│   ├── single_phase.py         # 单相流求解器
-│   ├── two_phase_impes.py      # 两相流IMPES求解器
-│   └── two_phase_fim.py        # 两相流FIM求解器
-├── visualization/              # 可视化模块
-│   ├── __init__.py
-│   ├── plot_2d.py              # 2D可视化
-│   ├── plot_3d.py              # 3D可视化
-│   └── animation.py            # 动画生成
-├── utils/                      # 工具函数
-│   ├── __init__.py
-│   ├── io.py                   # 输入输出
-│   ├── units.py                # 单位转换
-│   └── validation.py           # 数据验证
+├── docs/                       # 文档
+│   ├── api/                    # API文档
+│   ├── tutorials/              # 教程
+│   └── theory/                 # 理论文档
 ├── examples/                   # 示例脚本
 │   ├── simple_example.py
 │   ├── single_phase_2d.py
@@ -74,11 +83,9 @@ reservoir_sim/
 │   ├── test_physics.py
 │   ├── test_solvers.py
 │   └── test_visualization.py
-├── docs/                       # 文档
-│   ├── api/                    # API文档
-│   ├── tutorials/              # 教程
-│   └── theory/                 # 理论文档
-└── setup.py                   # 安装脚本
+├── main.py                     # 程序入口
+├── setup.py                    # 安装脚本
+└── README.md                   # 说明文档
 ```
 
 ## 🧩 核心模块详解
@@ -217,8 +224,8 @@ reservoir_sim/
 
 ### 基本使用
 
-```python
-from reservoir_sim import ReservoirSimulator
+```
+from reservoirpy import ReservoirSimulator
 
 # 使用配置文件创建模拟器
 simulator = ReservoirSimulator('config/default_config.yaml')
@@ -232,8 +239,8 @@ pressure_field = simulator.get_pressure_field()
 
 ### 程序化配置
 
-```python
-from reservoir_sim import ReservoirSimulator
+```
+from reservoirpy import ReservoirSimulator
 
 # 使用字典配置
 config = {
@@ -264,8 +271,8 @@ results = simulator.run_simulation()
 
 ### 网格和物理属性
 
-```python
-from reservoir_sim import StructuredMesh, SinglePhaseProperties
+```
+from reservoirpy import StructuredMesh, SinglePhaseProperties
 
 # 创建网格
 mesh = StructuredMesh(nx=20, ny=20, nz=1, dx=10.0, dy=10.0, dz=5.0)
@@ -283,7 +290,7 @@ physics = SinglePhaseProperties(mesh, {
 
 运行示例脚本：
 
-```bash
+```
 python examples/simple_example.py
 ```
 
@@ -306,15 +313,15 @@ python examples/simple_example.py
 
 运行测试：
 
-```bash
+```
 pytest tests/
 ```
 
 ## 📚 文档
 
-- [API文档](docs/api/API文档.md)
-- [教程](../../docs/tutorials/)
-- [理论背景](../../docs/theory/)
+- [API文档](src/reservoirpy/docs/api/API文档.md)
+- [教程](src/reservoirpy/docs/tutorials/)
+- [理论背景](src/reservoirpy/docs/theory/)
 
 ## 🤝 贡献
 

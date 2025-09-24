@@ -101,7 +101,7 @@ class ReservoirSimulator:
             初始压力场
         """
         initial_pressure = self.config['simulation'].get('initial_pressure', 30e6)
-        return np.full(self.mesh.ncell, initial_pressure)
+        return np.full(self.mesh.n_cells, initial_pressure)
     
     def set_boundary_conditions(self, boundary_conditions: List[Dict[str, Any]]):
         """

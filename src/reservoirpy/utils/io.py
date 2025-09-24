@@ -6,10 +6,58 @@
 
 import yaml
 import json
-import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Union
 import os
+import pyvista as pv
+import numpy as np
+
+
+def mesh_to_vtk(mesh, pressure=None, saturation=None, permeability=None, filename="reservoir.vtk", file_format="binary"):
+    """
+    将结构化网格和场数据保存为VTK文件
+
+    Args:
+        mesh: StructuredMesh对象
+        pressure: 压力场数据数组
+        saturation: 饱和度场数据数组
+        permeability: 渗透率场数据数组
+        filename: 保存的VTK文件名
+        file_format: 文件格式，"binary"（默认，文件小）或"ascii"（可用文本编辑器查看）
+    """
+    # 创建节点坐标数组
+    points = np.array([node.coord for node in mesh.node_list])
+
+    # 创建单元连接信息
+    cells = []
+    cell_types = []
+
+    for cell in mesh.cell_list:
+        # 每个六面体单元有8个顶点
+        node_indices = cell.vertices  # 使用vertices属性而不是nodes
+        cells.extend([8] + node_indices)  # VTK格式: [n_points, point0, point1, ...]
+        cell_types.append(pv.CellType.HEXAHEDRON)
+
+    # 创建非结构化网格
+    grid = pv.UnstructuredGrid(np.array(cells), np.array(cell_types), points)
+
+    # 添加场数据
+    if pressure is not None:
+        grid.cell_data["Pressure"] = pressure
+
+    if saturation is not None:
+        grid.cell_data["Saturation"] = saturation
+
+    if permeability is not None:
+        grid.cell_data["Permeability"] = permeability
+
+    # 保存为VTK文件
+    if file_format.lower() == "ascii":
+        grid.save(filename, binary=False)
+        print(f"网格数据已保存到 {filename} (ASCII格式，可用文本编辑器查看)")
+    else:
+        grid.save(filename, binary=True)
+        print(f"网格数据已保存到 {filename} (二进制格式)")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
