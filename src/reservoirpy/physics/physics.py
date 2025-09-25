@@ -6,10 +6,56 @@
 
 import numpy as np
 from typing import Dict, Any
+from abc import ABC, abstractmethod
 from reservoirpy.mesh.mesh import StructuredMesh
 
 
-class SinglePhaseProperties:
+class BasePhysics(ABC):
+    """
+    物理属性基类
+    
+    定义所有物理属性类的通用接口
+    """
+    
+    def __init__(self, mesh: StructuredMesh, config: Dict[str, Any]):
+        """
+        初始化基类
+        
+        Args:
+            mesh: 网格对象
+            config: 配置字典
+        """
+        self.mesh = mesh
+        self.config = config
+    
+    @abstractmethod
+    def update_cell_properties(self, cell: 'Cell', cell_index: int):
+        """
+        更新单元物理属性
+        
+        Args:
+            cell: 单元对象
+            cell_index: 单元索引
+        """
+        pass
+    
+    @abstractmethod
+    def get_transmissibility(self, cell_i: int, cell_j: int, direction: str) -> float:
+        """
+        计算传导率
+        
+        Args:
+            cell_i: 当前单元索引
+            cell_j: 相邻单元索引
+            direction: 方向 ('x', 'y', 'z')
+            
+        Returns:
+            传导率值
+        """
+        pass
+
+
+class SinglePhaseProperties(BasePhysics):
     """
     单相流物理属性类
     
@@ -22,10 +68,14 @@ class SinglePhaseProperties:
         
         Args:
             mesh: 网格对象
-            config: 配置字典
+            config: 配置字典，包含以下键值对（所有参数均使用SI标准单位）：
+                - permeability (float or np.ndarray): 渗透率，单位为mD，默认100.0
+                - porosity (float or np.ndarray): 孔隙度，默认0.2
+                - viscosity (float): 粘度，单位为Pa·s，默认0.001
+                - compressibility (float): 压缩系数，单位为1/Pa，默认1e-9
+                - reference_pressure (float): 参考压力，单位为Pa，默认0.0
         """
-        self.mesh = mesh
-        self.config = config
+        super().__init__(mesh, config)
         
         # 单位转换因子
         self.mD_to_m2 = 9.869233e-16  # mD to m²
@@ -37,7 +87,7 @@ class SinglePhaseProperties:
         self.porosity = self._init_porosity(config)
         self.viscosity = self._init_viscosity(config)
         self.compressibility = self._init_compressibility(config)
-        self.reference_pressure = config.get('reference_pressure', 0.0)
+        self.reference_pressure = config.get('reference_pressure', 30e6)
     
     def _init_permeability(self, config: Dict[str, Any]) -> np.ndarray:
         """
@@ -47,22 +97,23 @@ class SinglePhaseProperties:
             config: 配置字典
             
         Returns:
-            渗透率数组，形状为 (nx, ny, nz, 3)
+            渗透率数组，形状为 (nz, ny, nx, 3) 以匹配 get_cell_coords 返回的 (i,j,k) = (z,y,x)
         """
         nx, ny, nz = self.mesh.grid_shape
         
         # 获取渗透率值
-        perm_value = config.get('permeability', 100.0)  # 默认100 mD
+        perm_value = float(config.get('permeability', 100.0))  # 默认100 mD
         
         if isinstance(perm_value, (int, float)):
-            # 均质渗透率
+            # 均质渗透率 - 修正维度顺序为 (nz, ny, nx, 3)
             perm_array = np.full((nz, ny, nx, 3), perm_value)
         elif isinstance(perm_value, np.ndarray):
             # 非均质渗透率
             if perm_value.ndim == 1:
-                # 一维数组，展平为三维
+                # 一维数组，展平为三维 - 修正维度顺序
                 perm_3d = perm_value.reshape(nz, ny, nx)
             elif perm_value.ndim == 3:
+                # 假设输入的三维数组已经是正确的 (nz, ny, nx) 顺序
                 perm_3d = perm_value
             else:
                 raise ValueError("Permeability array must be 1D or 3D")
@@ -90,7 +141,7 @@ class SinglePhaseProperties:
             config: 配置字典
             
         Returns:
-            孔隙度数组，形状为 (nx, ny, nz)
+            孔隙度数组，形状为 (nz, ny, nx) 以匹配坐标系统
         """
         nx, ny, nz = self.mesh.grid_shape
         
@@ -98,7 +149,7 @@ class SinglePhaseProperties:
         poro_value = config.get('porosity', 0.2)  # 默认0.2
         
         if isinstance(poro_value, (int, float)):
-            # 均质孔隙度
+            # 均质孔隙度 - 修正维度顺序为 (nz, ny, nx)
             return np.full((nz, ny, nx), poro_value)
         elif isinstance(poro_value, np.ndarray):
             # 非均质孔隙度
@@ -121,12 +172,8 @@ class SinglePhaseProperties:
         Returns:
             粘度值 (Pa·s)
         """
-        viscosity = config.get('viscosity', 0.001)  # 默认1 cP
-        
-        # 如果输入单位是cP，转换为Pa·s
-        if config.get('viscosity_unit', 'Pa.s') == 'cP':
-            viscosity *= self.cP_to_Pas
-        
+        # 直接使用SI单位，不进行单位转换
+        viscosity = config.get('viscosity', 0.001)  # 默认0.001 Pa·s
         return viscosity
     
     def _init_compressibility(self, config: Dict[str, Any]) -> float:
@@ -192,9 +239,9 @@ class SinglePhaseProperties:
             cell: 单元对象
             cell_index: 单元索引
         """
-        i, j, k = self.mesh.get_cell_coords(cell_index)
+        i, j, k = self.mesh.get_cell_coords(cell_index)  # i, j , k 对应z,y,x 方向索引
         
-        # 更新渗透率
+        # 更新渗透率 - 现在数组维度已经匹配 (i,j,k) = (z,y,x)
         cell.kx = self.permeability[i, j, k, 0]
         cell.ky = self.permeability[i, j, k, 1]
         cell.kz = self.permeability[i, j, k, 2]
@@ -231,7 +278,20 @@ class TwoPhaseProperties(SinglePhaseProperties):
         
         Args:
             mesh: 网格对象
-            config: 配置字典
+            config: 配置字典，包含以下键值对（所有参数均使用SI标准单位）：
+                - permeability (float or np.ndarray): 渗透率，单位为mD，默认100.0
+                - porosity (float or np.ndarray): 孔隙度，默认0.2
+                - viscosity (float): 粘度，单位为Pa·s，默认0.001
+                - compressibility (float): 压缩系数，单位为1/Pa，默认1e-9
+                - reference_pressure (float): 参考压力，单位为Pa，默认0.0
+                - oil_viscosity (float): 油相粘度，单位为Pa·s，默认2e-3
+                - water_viscosity (float): 水相粘度，单位为Pa·s，默认1e-3
+                - kro_model (str): 油相相对渗透率模型，'corey'等，默认'corey'
+                - krw_model (str): 水相相对渗透率模型，'corey'等，默认'corey'
+                - pc_model (str): 毛管压力模型，'brooks_corey'等，默认'brooks_corey'
+                - kro_params (dict): 油相相对渗透率模型参数，默认{'n_o': 2.0, 'S_or': 0.2}
+                - krw_params (dict): 水相相对渗透率模型参数，默认{'n_w': 2.0, 'S_wr': 0.2}
+                - pc_params (dict): 毛管压力模型参数，默认{'P_c0': 1000.0, 'lambda': 2.0}
         """
         super().__init__(mesh, config)
         

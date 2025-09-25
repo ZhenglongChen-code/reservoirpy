@@ -35,14 +35,14 @@ class Well:
         self.well_index = None  # 产能指数
         
     def compute_well_index(self, mesh: StructuredMesh, permeability: float, 
-                          viscosity: float) -> float:
+                          viscosity: float=0.001) -> float:
         """
         计算产能指数 WI = 2πKh / (μ(ln(re/rw) + S))
         
         Args:
             mesh: 网格对象
             permeability: 渗透率 (m²)
-            viscosity: 粘度 (Pa·s)
+            viscosity: 粘度 (Pa·s) 默认1e-3
             
         Returns:
             产能指数 WI
@@ -50,13 +50,12 @@ class Well:
         # 计算等效半径（Peaceman公式）
         dx = float(mesh.dx)
         dy = float(mesh.dy)
+        dz = float(mesh.dz)
         self.re = 0.14 * (dx**2 + dy**2)**0.5
         
-        # 计算产能指数
-        # 使用原始代码的固定渗透率值进行计算
-        k_fixed = 2.5e-15  # 固定渗透率值，与原始代码一致
-        self.well_index = (2 * np.pi * float(dx) * k_fixed / 
-                          float(viscosity) / (math.log(self.re / self.rw) + self.skin_factor))
+        # 计算产能指数 - 使用实际的渗透率值
+        self.well_index = (2 * np.pi * float(permeability) * float(dz) / 
+                          (float(viscosity) * (math.log(self.re / self.rw) + self.skin_factor)))
         
         return self.well_index
     
@@ -103,20 +102,18 @@ class Well:
             # 定流量：直接添加到右端项
             b[cell_index] += well_term * dt
     
-    def add_to_matrix(self, A: Any, cell_index: int, dt: float):
+    def add_to_matrix(self, A, cell_index: int, dt: float):
         """
         将井项添加到系数矩阵（仅用于定井底流压）
-        
-        注意：根据原始代码，井项只影响右端向量，不影响系数矩阵
         
         Args:
             A: 系数矩阵
             cell_index: 单元索引
             dt: 时间步长
         """
-        # 原始代码中井项只影响右端向量，不影响系数矩阵
-        pass
-
+        if self.control_type == 'bhp':
+            # 定井底流压：需要在系数矩阵对角线上添加井指数项
+            A[cell_index, cell_index] += self.well_index * dt
 
 class WellManager:
     """井管理器类"""
@@ -153,13 +150,14 @@ class WellManager:
         """
         for well in self.wells:
             z, y, x = well.location
-            cell_index = self.mesh.get_cell_index(z, y, x)
+            # cell_index = self.mesh.get_cell_index(z, y, x)
             
             # 获取井所在单元的渗透率
+            # 修正坐标顺序：permeability 形状为 (nz, ny, nx, 3)
             if permeability.ndim == 4:  # (nz, ny, nx, 3)
-                k = permeability[z, y, x, 0]  # Kx
+                k = permeability[z, y, x, 0]  # Kx - 使用正确的坐标顺序 (z, y, x)
             else:  # (nz, ny, nx)
-                k = permeability[z, y, x]
+                k = permeability[z, y, x]  # 使用正确的坐标顺序 (z, y, x)
             
             well.compute_well_index(self.mesh, k, viscosity)
     

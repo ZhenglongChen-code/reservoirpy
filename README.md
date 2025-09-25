@@ -35,34 +35,35 @@ reservoirpy/
 │       ├── __init__.py         # 包初始化
 │       ├── core/               # 核心模块
 │       │   ├── __init__.py
-│       │   ├── mesh.py                 # 网格管理
-│       │   ├── physics.py              # 物理属性模型
 │       │   ├── discretization.py       # FVM离散化
-│       │   ├── time_integration.py     # 时间积分
 │       │   ├── linear_solver.py        # 线性求解器
 │       │   ├── nonlinear_solver.py     # 非线性求解器（两相流）
-│       │   ├── well_model.py           # 井模型
-│       │   └── simulator.py            # 主模拟器
-│       ├── solvers/                    # 求解器
+│       │   ├── simulator.py            # 主模拟器
+│       │   ├── time_integration.py     # 时间积分
+│       │   └── well_model.py           # 井模型
+│       ├── mesh/                       # 网格模块
+│       │   ├── __init__.py
+│       │   └── mesh.py                 # 网格管理
+│       ├── models/                     # 求解器模型
 │       │   ├── __init__.py
 │       │   ├── single_phase.py         # 单相流求解器
 │       │   ├── two_phase_impes.py      # 两相流IMPES求解器
 │       │   └── two_phase_fim.py        # 两相流FIM求解器
-│       ├── visualization/              # 可视化模块
+│       ├── physics/                    # 物理模型
 │       │   ├── __init__.py
-│       │   ├── plot_2d.py              # 2D可视化
-│       │   ├── plot_3d.py              # 3D可视化
-│       │   └── animation.py            # 动画生成
+│       │   └── physics.py              # 物理属性模型
 │       ├── utils/                      # 工具函数
 │       │   ├── __init__.py
 │       │   ├── io.py                   # 输入输出
 │       │   ├── units.py                # 单位转换
 │       │   └── validation.py           # 数据验证
-│       ├── physics/                    # 物理模型
-│       │   └── __init__.py
+│       ├── visualization/              # 可视化模块
+│       │   ├── __init__.py
+│       │   ├── plot_2d.py              # 2D可视化
+│       │   ├── plot_3d.py              # 3D可视化
+│       │   └── animation.py            # 动画生成
 │       └── main.py             # 主入口
 ├── config/                     # 配置文件
-│   ├── __init__.py
 │   ├── default_config.yaml     # 默认配置
 │   └── examples/               # 示例配置
 ├── docs/                       # 文档
@@ -70,13 +71,8 @@ reservoirpy/
 │   ├── tutorials/              # 教程
 │   └── theory/                 # 理论文档
 ├── examples/                   # 示例脚本
-│   ├── simple_example.py
-│   ├── single_phase_2d.py
-│   ├── single_phase_3d.py
-│   ├── two_phase_2d.py
-│   └── benchmark/              # 基准测试
-│       ├── analytical_solutions.py
-│       └── validation_cases.py
+│   ├── basical.py
+│   └── simple_example.py
 ├── tests/                      # 测试
 │   ├── __init__.py
 │   ├── test_mesh.py
@@ -90,16 +86,16 @@ reservoirpy/
 
 ## 🧩 核心模块详解
 
-### 1. 网格模块 (`core/mesh.py`)
+### 1. 网格模块 (`mesh/mesh.py`)
 
 提供结构化矩形网格（2D/3D）的拓扑与几何信息，支持后续FVM离散。
 
 主要类:
 - `StructuredMesh`: 结构化网格管理类
-- `Cell`: 网格单元类
+- `CubeCell`: 网格单元类
 - `Node`: 网格节点类
 
-### 2. 物理属性模块 (`core/physics.py`)
+### 2. 物理属性模块 (`physics/physics.py`)
 
 封装单相流和两相流动物理参数，为FVM提供物性输入。
 
@@ -134,7 +130,6 @@ reservoirpy/
 
 主要类:
 - `NewtonRaphsonSolver`: 牛顿-拉夫森求解器
-- `TwoPhaseFlowSolver`: 两相流求解器
 
 ### 7. 井模型模块 (`core/well_model.py`)
 
@@ -153,21 +148,21 @@ reservoirpy/
 
 ## 🧮 求解器模块
 
-### 1. 单相流求解器 (`solvers/single_phase.py`)
+### 1. 单相流求解器 (`models/single_phase.py`)
 
 实现单相流油藏模拟的完整求解流程。
 
 主要类:
 - `SinglePhaseSolver`: 单相流求解器
 
-### 2. 两相流IMPES求解器 (`solvers/two_phase_impes.py`)
+### 2. 两相流IMPES求解器 (`models/two_phase_impes.py`)
 
 实现隐式压力-显式饱和度方法求解两相流问题。
 
 主要类:
 - `TwoPhaseIMPES`: IMPES求解器
 
-### 3. 两相流FIM求解器 (`solvers/two_phase_fim.py`)
+### 3. 两相流FIM求解器 (`models/two_phase_fim.py`)
 
 实现全隐式方法求解两相流问题。
 
@@ -202,9 +197,6 @@ reservoirpy/
 ### 1. 输入输出 (`utils/io.py`)
 
 提供配置文件读写、数据导入导出等功能。
-
-主要类:
-- `ConfigManager`: 配置管理器
 
 ### 2. 单位转换 (`utils/units.py`)
 
@@ -272,7 +264,8 @@ results = simulator.run_simulation()
 ### 网格和物理属性
 
 ```
-from reservoirpy import StructuredMesh, SinglePhaseProperties
+from reservoirpy.mesh.mesh import StructuredMesh
+from reservoirpy.physics.physics import SinglePhaseProperties
 
 # 创建网格
 mesh = StructuredMesh(nx=20, ny=20, nz=1, dx=10.0, dy=10.0, dz=5.0)
@@ -291,10 +284,10 @@ physics = SinglePhaseProperties(mesh, {
 运行示例脚本：
 
 ```
-python examples/simple_example.py
+python examples/basical.py
 ```
 
-这将创建一个10×10的2D网格，设置两口井，并运行7天的模拟。
+这将创建一个网格并展示基本的可视化功能。
 
 ## 🔧 配置
 
@@ -319,9 +312,9 @@ pytest tests/
 
 ## 📚 文档
 
-- [API文档](src/reservoirpy/docs/api/API文档.md)
-- [教程](src/reservoirpy/docs/tutorials/)
-- [理论背景](src/reservoirpy/docs/theory/)
+- [API文档](docs/api/)
+- [教程](docs/tutorials/)
+- [理论背景](docs/theory/)
 
 ## 🤝 贡献
 
@@ -343,4 +336,4 @@ pytest tests/
 
 ---
 
-*基于现有的 `meshgrid.py` 代码重构，在保持功能完整性的基础上，提供了清晰的模块化架构和扩展路径。*
+*基于重构后的模块化架构，提供了更清晰的代码组织结构和更好的可扩展性。*

@@ -32,11 +32,13 @@ from reservoirpy.mesh.mesh import StructuredMesh, CubeCell, Node
 from reservoirpy.physics.physics import SinglePhaseProperties, TwoPhaseProperties
 from .core.simulator import ReservoirSimulator
 from .core.well_model import Well, WellManager, create_well_from_config, validate_well_config
+from .core.discretization import FVMDiscretizer
 
 # 向后兼容
 MeshGrid = StructuredMesh
 
 __all__ = [
+    'FVMDiscretizer',
     'StructuredMesh',
     'CubeCell',
     'Node',

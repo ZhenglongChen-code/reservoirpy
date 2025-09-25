@@ -458,14 +458,14 @@ class StructuredMesh(BaseMesh):
         从一维索引获取三维坐标
         
         Args:
-            index: 单元索引
+            index: 单元索引(1 -- self.n_cells)
             
         Returns:
-            (i, j, k) 三维坐标
+            (i, j, k) 三维坐标,对应（z, y, x)方向索引
         """
-        k = index % self.nx
-        j = (index // self.nx) % self.ny
-        i = index // (self.nx * self.ny)
+        k = index % self.nx # x方向索引
+        j = (index // self.nx) % self.ny # y方向索引
+        i = index // (self.nx * self.ny) # z方向索引
         return i, j, k
     
     @property
@@ -479,7 +479,7 @@ class StructuredMesh(BaseMesh):
         return (self.nx, self.ny, self.nz)
     
     def __repr__(self):
-        return f"StructuredMesh({self.nx}x{self.ny}x{self.nz}, cells={self.n_cells})"
+        return f"StructuredMesh(nz={self.nz}, ny={self.ny}, nx={self.nx}), shape: ({self.nz}x{self.ny}x{self.nx}, cells={self.n_cells})"
 
 
 # 向后兼容的别名

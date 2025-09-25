@@ -13,8 +13,8 @@ print(mesh)
 
 # 生成示例数据
 np.random.seed(42)
-pressure = np.random.rand(mesh.n_cells) * 100 + 1000  # 压力数据 (1000-1100 Pa)
-saturation = np.random.rand(mesh.n_cells)  # 饱和度数据 (0-1)
+pressure = np.arange(mesh.n_cells) * 100 + 1000  # 压力数据 (1000-1100 Pa)
+saturation = np.arange(mesh.n_cells)  # 饱和度数据 (0-1)
 permeability = np.random.rand(mesh.n_cells) * 100 + 50  # 渗透率数据 (50-150 mD)
 
 # 创建3D可视化器

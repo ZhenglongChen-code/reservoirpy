@@ -8,7 +8,7 @@ import yaml
 import numpy as np
 from typing import Dict, Any, Optional, List, Union
 from reservoirpy.mesh.mesh import StructuredMesh
-from reservoirpy.physics.physics import SinglePhaseProperties
+from reservoirpy.physics.physics import SinglePhaseProperties, TwoPhaseProperties
 from .discretization import FVMDiscretizer
 from .well_model import WellManager
 
@@ -50,11 +50,17 @@ class ReservoirSimulator:
         
         # 初始化物理属性
         physics_config = self.config['physics']
-        self.physics = SinglePhaseProperties(self.mesh, physics_config)
+        if physics_config['type'] == 'two_phase':
+            self.physics = TwoPhaseProperties(self.mesh, physics_config)
+        elif physics_config['type'] == 'single_phase':
+            self.physics = SinglePhaseProperties(self.mesh, physics_config)
+        else:
+            raise ValueError("Invalid physics type")
+
         
-        # 更新单元物理属性
-        for i, cell in enumerate(self.mesh.cell_list):
-            self.physics.update_cell_properties(cell, i)
+        # # 更新单元物理属性
+        # for i, cell in enumerate(self.mesh.cell_list):
+        #     self.physics.update_cell_properties(cell, i)
         
         # 初始化井
         self.well_manager = self._init_well_manager()
