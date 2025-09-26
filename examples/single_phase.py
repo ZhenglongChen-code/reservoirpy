@@ -12,8 +12,6 @@
 孔隙度：$\phi = 0.2$；
 源汇项：$q = 0$（无注入或生产）。
 """
-import numpy as np
-
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -42,12 +40,12 @@ config = {
         'compressibility': 1e-9  # 1/Pa
     },
     'wells': [
-        {'location': [0, 0, 0], 'control_type': 'bhp', 'value': 2000}  # 只保留一口注入井
+        {'location': [0, 0, 0], 'control_type': 'bhp', 'value': 2000000}  # 只保留一口注入井
     ],
     'simulation': {
-        'dt': 36,           # 时间步长(秒)
+        'dt': 720,           # 时间步长(秒)
         'total_time': 3600,  # 减少模拟时间
-        'initial_pressure': 3000 # 初始压力(Pa)
+        'initial_pressure': 3000000 # 初始压力(Pa)
     }
 }
 
@@ -94,7 +92,7 @@ A, b = discretizer.discretize_single_phase(config['simulation']['dt'], pressure,
 print(A.shape, b.shape)
 
 # 简化模拟循环，只运行几个时间步
-for t in range(10):  # 只运行5个时间步进行测试
+for t in range(100):  # 只运行5个时间步进行测试
     print(f"Time step {t}")
     # 6. 模拟
     pressure_new = discretizer.solve_linear_system(A, b)
