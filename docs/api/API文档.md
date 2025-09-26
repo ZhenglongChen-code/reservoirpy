@@ -146,7 +146,67 @@ Returns:
 ##### `__repr__(self)`
 返回网格对象的字符串表示
 
-### 2. SinglePhaseProperties (单相流物理属性)
+### 2. PropertyManager (属性管理器)
+
+属性管理器类，负责物理属性的存储和访问，解耦物理属性与网格单元的直接关联。
+
+#### 类定义
+```python
+class PropertyManager:
+    def __init__(self, mesh: StructuredMesh, config: Dict[str, Any])
+```
+
+#### 参数说明
+- `mesh`: 网格对象
+- `config`: 配置字典
+
+#### 属性
+- `mesh`: 网格对象
+- `properties`: 包含所有物理属性的字典
+
+#### 方法
+
+##### `__init__(self, mesh: StructuredMesh, config: Dict[str, Any])`
+初始化属性管理器
+
+##### `_initialize_properties(self, config: Dict[str, Any]) -> Dict[str, Any]`
+初始化所有物理属性
+
+Args:
+    config: 配置字典
+
+Returns:
+    包含所有物理属性的字典
+
+##### `_init_permeability(self, config: Dict[str, Any]) -> Union[float, np.ndarray]`
+初始化渗透率
+
+Args:
+    config: 配置字典
+
+Returns:
+    渗透率值或数组
+
+##### `_init_porosity(self, config: Dict[str, Any]) -> Union[float, np.ndarray]`
+初始化孔隙度
+
+Args:
+    config: 配置字典
+
+Returns:
+    孔隙度值或数组
+
+##### `get_cell_property(self, cell_index: int, property_name: str) -> float`
+获取指定单元的属性值
+
+Args:
+    cell_index: 单元索引
+    property_name: 属性名称 ('permeability', 'porosity')
+
+Returns:
+    指定单元的属性值
+
+### 3. SinglePhaseProperties (单相流物理属性)
 
 单相流物理属性类，封装单相流动物理参数，包括渗透率、孔隙度、粘度、压缩系数等。
 
@@ -168,11 +228,7 @@ class SinglePhaseProperties(BasePhysics):
 #### 属性
 - `mesh`: 网格对象
 - `config`: 配置字典
-- `mD_to_m2`: mD到m²的单位转换因子
-- `cP_to_Pas`: cP到Pa·s的单位转换因子
-- `psi_to_Pa`: psi到Pa的单位转换因子
-- `permeability`: 渗透率数组，形状为 (nx, ny, nz, 3)
-- `porosity`: 孔隙度数组，形状为 (nx, ny, nz)
+- `property_manager`: 属性管理器
 - `viscosity`: 粘度值 (Pa·s)
 - `compressibility`: 压缩系数 (1/Pa)
 - `reference_pressure`: 参考压力 (Pa)
@@ -181,24 +237,6 @@ class SinglePhaseProperties(BasePhysics):
 
 ##### `__init__(self, mesh: StructuredMesh, config: Dict[str, Any])`
 初始化单相流物理属性
-
-##### `_init_permeability(self, config: Dict[str, Any]) -> np.ndarray`
-初始化渗透率
-
-Args:
-    config: 配置字典
-
-Returns:
-    渗透率数组，形状为 (nx, ny, nz, 3)
-
-##### `_init_porosity(self, config: Dict[str, Any]) -> np.ndarray`
-初始化孔隙度
-
-Args:
-    config: 配置字典
-
-Returns:
-    孔隙度数组，形状为 (nx, ny, nz)
 
 ##### `_init_viscosity(self, config: Dict[str, Any]) -> float`
 初始化粘度
@@ -229,13 +267,6 @@ Args:
 Returns:
     传导率值
 
-##### `update_cell_properties(self, cell: Cell, cell_index: int)`
-更新单元物理属性
-
-Args:
-    cell: 单元对象
-    cell_index: 单元索引
-
 ##### `get_fluid_density(self, pressure: float) -> float`
 计算流体密度（微可压缩模型）
 
@@ -245,7 +276,7 @@ Args:
 Returns:
     密度 (kg/m³)
 
-### 3. Well (井模型)
+### 4. Well (井模型)
 
 #### 类定义
 ```python
@@ -281,7 +312,7 @@ class Well:
 ##### `add_to_rhs(b: np.ndarray, cell_index: int, pressure: float, dt: float) -> None`
 将井项添加到右端向量
 
-### 4. FVMDiscretizer (有限体积法离散化器)
+### 5. FVMDiscretizer (有限体积法离散化器)
 
 #### 类定义
 ```python
@@ -301,7 +332,7 @@ class FVMDiscretizer:
 ##### `solve_linear_system(A: csr_matrix, b: np.ndarray, method: str = 'bicgstab', tolerance: float = 1e-8, max_iterations: int = 1000) -> np.ndarray`
 求解线性系统
 
-### 5. ReservoirSimulator (主模拟器)
+### 6. ReservoirSimulator (主模拟器)
 
 #### 类定义
 ```python
@@ -407,3 +438,4 @@ config = {
 
 simulator = ReservoirSimulator(config_dict=config)
 results = simulator.run_simulation()
+```

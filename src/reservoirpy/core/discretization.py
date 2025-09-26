@@ -143,9 +143,10 @@ class FVMDiscretizer:
         Returns:
             (系数矩阵A, 右端向量b)
         """
-        # 使用NumPy初始化稠密矩阵，便于理解FVM结构
-        # 每一行i对应网格单元i的守恒方程
-        A = np.zeros((self.total_cells, self.total_cells))
+        # 直接使用稀疏矩阵初始化，提高内存效率
+        # 使用COO格式构建矩阵，便于增量更新
+        from scipy.sparse import lil_matrix
+        A = lil_matrix((self.total_cells, self.total_cells))
         b = np.zeros(self.total_cells)
         
         # 对每个控制体积（网格单元）应用FVM离散化
@@ -156,10 +157,12 @@ class FVMDiscretizer:
             # ====== 1. 累积项离散化 ======
             # 原始项: ∫∫∫_V φ·c·∂p/∂t dV ≈ V·φ·c·(p^{n+1} - p^n)/Δt
             # 系数矩阵贡献: V·φ·c/Δt (对角项)
-            # 累积项离散化中的压缩系数
             compressibility = getattr(self.physics, 'compressibility', 1e-9)  # 默认值
                 
-            accumulation_coeff = (float(cell.volume) * float(cell.porosity) * 
+            # 从属性管理器获取孔隙度
+            porosity = self.physics.property_manager.get_cell_property(i, 'porosity')
+                
+            accumulation_coeff = (float(cell.volume) * float(porosity) * 
                                  float(compressibility) / dt)
             
             A[i, i] += accumulation_coeff  # 对角项: V·φ·c/Δt
@@ -185,21 +188,19 @@ class FVMDiscretizer:
                     # 非对角项: -T_ij·p_j (相邻单元的贡献)
                     # 来自 T_ij·(p_j - p_i) 中的 T_ij·p_j 项
                     A[i, neighbor_idx] -= trans
-                # else: 边界界面，暂时处理为零通量边界条件
+                # else: 边界界面，零通量边界条件（不需要额外处理）
             
             # 对角项: +Σ_faces T_face (来自 -T_ij·(-p_i) = +T_ij·p_i)
             A[i, i] += total_transmissibility
-            
-            # ====== 3. 源汇项将通过井管理器统一处理 ======
-            # Q_well 项将在 well_manager.apply_well_terms() 中添加
         
-        # ====== 4. 应用井项和边界条件 ======
+        # ====== 3. 应用井项 ======
+        # Q_well 项通过井管理器添加到线性系统中
         well_manager.apply_well_terms(A, b, pressure, dt)
         
-        # ====== 5. 转换为稀疏矩阵提高求解效率 ======
-        A_sparse = csr_matrix(A)
+        # ====== 4. 转换为CSR格式提高求解效率 ======
+        A_csr = A.tocsr()
         
-        return A_sparse, b
+        return A_csr, b
     
     def _verify_matrix_properties(self, A: Union[np.ndarray, csr_matrix]) -> Dict[str, Any]:
         """

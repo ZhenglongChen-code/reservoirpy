@@ -5,7 +5,7 @@
 """
 
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from abc import ABC, abstractmethod
 from reservoirpy.mesh.mesh import StructuredMesh
 
@@ -27,17 +27,7 @@ class BasePhysics(ABC):
         """
         self.mesh = mesh
         self.config = config
-    
-    @abstractmethod
-    def update_cell_properties(self, cell: 'Cell', cell_index: int):
-        """
-        更新单元物理属性
-        
-        Args:
-            cell: 单元对象
-            cell_index: 单元索引
-        """
-        pass
+        self.property_manager = PropertyManager(mesh, config)
     
     @abstractmethod
     def get_transmissibility(self, cell_i: int, cell_j: int, direction: str) -> float:
@@ -53,6 +43,139 @@ class BasePhysics(ABC):
             传导率值
         """
         pass
+
+
+class PropertyManager:
+    """
+    属性管理器
+    
+    负责物理属性的存储和访问，解耦物理属性与网格单元的直接关联。
+    """
+    
+    def __init__(self, mesh: StructuredMesh, config: Dict[str, Any]):
+        """
+        初始化属性管理器
+        
+        Args:
+            mesh: 网格对象
+            config: 配置字典
+        """
+        self.mesh = mesh
+        self.properties = self._initialize_properties(config)
+    
+    def _initialize_properties(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        初始化所有物理属性
+        
+        Args:
+            config: 配置字典
+            
+        Returns:
+            包含所有物理属性的字典
+        """
+        properties = {}
+        properties['permeability'] = self._init_permeability(config)
+        properties['porosity'] = self._init_porosity(config)
+        return properties
+    
+    def _init_permeability(self, config: Dict[str, Any]) -> Union[float, np.ndarray]:
+        """
+        初始化渗透率
+        
+        Args:
+            config: 配置字典
+            
+        Returns:
+            渗透率值或数组
+        """
+        # 获取渗透率值
+        perm_value = config.get('permeability', 100.0)  # 默认100 mD
+        
+        # 单位转换因子
+        mD_to_m2 = 9.869233e-16  # mD to m²
+        
+        if isinstance(perm_value, (int, float)):
+            # 均质渗透率，直接返回数值（已转换为SI单位）
+            return float(perm_value) * mD_to_m2
+        elif isinstance(perm_value, np.ndarray):
+            # 非均质渗透率
+            if perm_value.ndim == 1:
+                # 一维数组，展平为三维
+                nx, ny, nz = self.mesh.grid_shape
+                perm_3d = perm_value.reshape(nz, ny, nx)
+            elif perm_value.ndim == 3:
+                # 三维数组
+                perm_3d = perm_value
+            else:
+                raise ValueError("Permeability array must be 1D or 3D")
+            
+            # 转换为SI单位 (m²)
+            return perm_3d * mD_to_m2
+        else:
+            raise ValueError("Permeability must be a number or numpy array")
+    
+    def _init_porosity(self, config: Dict[str, Any]) -> Union[float, np.ndarray]:
+        """
+        初始化孔隙度
+        
+        Args:
+            config: 配置字典
+            
+        Returns:
+            孔隙度值或数组
+        """
+        # 获取孔隙度值
+        poro_value = config.get('porosity', 0.2)  # 默认0.2
+        
+        if isinstance(poro_value, (int, float)):
+            # 均质孔隙度，直接返回数值
+            return float(poro_value)
+        elif isinstance(poro_value, np.ndarray):
+            # 非均质孔隙度
+            if poro_value.ndim == 1:
+                # 一维数组，展平为三维
+                nx, ny, nz = self.mesh.grid_shape
+                return poro_value.reshape(nz, ny, nx)
+            elif poro_value.ndim == 3:
+                # 三维数组
+                return poro_value
+            else:
+                raise ValueError("Porosity array must be 1D or 3D")
+        else:
+            raise ValueError("Porosity must be a number or numpy array")
+    
+    def get_cell_property(self, cell_index: int, property_name: str) -> float:
+        """
+        获取指定单元的属性值
+        
+        Args:
+            cell_index: 单元索引
+            property_name: 属性名称 ('permeability', 'porosity')
+            
+        Returns:
+            指定单元的属性值
+        """
+        if property_name not in self.properties:
+            raise ValueError(f"Property {property_name} not found")
+            
+        prop = self.properties[property_name]
+        
+        # 如果是标量，直接返回
+        if isinstance(prop, (int, float)):
+            return float(prop)
+        
+        # 如果是数组，根据索引获取值
+        if isinstance(prop, np.ndarray):
+            i, j, k = self.mesh.get_cell_coords(cell_index)
+            if property_name == 'permeability':
+                # 渗透率是四维数组 (nz, ny, nx, 3)
+                # 为了简化，这里假设只考虑x方向的渗透率
+                return float(prop[i, j, k, 0]) if prop.ndim == 4 else float(prop[i, j, k])
+            else:
+                # 其他属性是三维数组 (nz, ny, nx)
+                return float(prop[i, j, k])
+        
+        raise ValueError(f"Unsupported property type for {property_name}")
 
 
 class SinglePhaseProperties(BasePhysics):
@@ -77,90 +200,10 @@ class SinglePhaseProperties(BasePhysics):
         """
         super().__init__(mesh, config)
         
-        # 单位转换因子
-        self.mD_to_m2 = 9.869233e-16  # mD to m²
-        self.cP_to_Pas = 1e-3  # cP to Pa·s
-        self.psi_to_Pa = 6894.76  # psi to Pa
-        
-        # 初始化物理属性
-        self.permeability = self._init_permeability(config)
-        self.porosity = self._init_porosity(config)
+        # 初始化物理参数
         self.viscosity = self._init_viscosity(config)
         self.compressibility = self._init_compressibility(config)
         self.reference_pressure = config.get('reference_pressure', 30e6)
-    
-    def _init_permeability(self, config: Dict[str, Any]) -> np.ndarray:
-        """
-        初始化渗透率
-        
-        Args:
-            config: 配置字典
-            
-        Returns:
-            渗透率数组，形状为 (nz, ny, nx, 3) 以匹配 get_cell_coords 返回的 (i,j,k) = (z,y,x)
-        """
-        nx, ny, nz = self.mesh.grid_shape
-        
-        # 获取渗透率值
-        perm_value = float(config.get('permeability', 100.0))  # 默认100 mD
-        
-        if isinstance(perm_value, (int, float)):
-            # 均质渗透率 - 修正维度顺序为 (nz, ny, nx, 3)
-            perm_array = np.full((nz, ny, nx, 3), perm_value)
-        elif isinstance(perm_value, np.ndarray):
-            # 非均质渗透率
-            if perm_value.ndim == 1:
-                # 一维数组，展平为三维 - 修正维度顺序
-                perm_3d = perm_value.reshape(nz, ny, nx)
-            elif perm_value.ndim == 3:
-                # 假设输入的三维数组已经是正确的 (nz, ny, nx) 顺序
-                perm_3d = perm_value
-            else:
-                raise ValueError("Permeability array must be 1D or 3D")
-            
-            perm_array = np.zeros((nz, ny, nx, 3))
-            perm_array[:, :, :, 0] = perm_3d  # Kx
-            perm_array[:, :, :, 1] = perm_3d  # Ky
-            perm_array[:, :, :, 2] = perm_3d * 0.1  # Kz (通常为水平渗透率的10%)
-        else:
-            raise ValueError("Permeability must be a number or numpy array")
-        
-        # 转换为SI单位 (m²)
-        if isinstance(perm_value, (int, float)):
-            # 数值类型，需要从mD转换为m²
-            return perm_array * self.mD_to_m2
-        else:
-            # 数组类型，已经是m²单位，不需要转换
-            return perm_array
-    
-    def _init_porosity(self, config: Dict[str, Any]) -> np.ndarray:
-        """
-        初始化孔隙度
-        
-        Args:
-            config: 配置字典
-            
-        Returns:
-            孔隙度数组，形状为 (nz, ny, nx) 以匹配坐标系统
-        """
-        nx, ny, nz = self.mesh.grid_shape
-        
-        # 获取孔隙度值
-        poro_value = config.get('porosity', 0.2)  # 默认0.2
-        
-        if isinstance(poro_value, (int, float)):
-            # 均质孔隙度 - 修正维度顺序为 (nz, ny, nx)
-            return np.full((nz, ny, nx), poro_value)
-        elif isinstance(poro_value, np.ndarray):
-            # 非均质孔隙度
-            if poro_value.ndim == 1:
-                return poro_value.reshape(nz, ny, nx)
-            elif poro_value.ndim == 3:
-                return poro_value
-            else:
-                raise ValueError("Porosity array must be 1D or 3D")
-        else:
-            raise ValueError("Porosity must be a number or numpy array")
     
     def _init_viscosity(self, config: Dict[str, Any]) -> float:
         """
@@ -173,7 +216,7 @@ class SinglePhaseProperties(BasePhysics):
             粘度值 (Pa·s)
         """
         # 直接使用SI单位，不进行单位转换
-        viscosity = config.get('viscosity', 0.001)  # 默认0.001 Pa·s
+        viscosity = config.get('viscosity', 0.002)  # 默认0.002 Pa·s
         return viscosity
     
     def _init_compressibility(self, config: Dict[str, Any]) -> float:
@@ -200,26 +243,22 @@ class SinglePhaseProperties(BasePhysics):
         Returns:
             传导率值
         """
-        # 获取单元坐标
-        i1, j1, k1 = self.mesh.get_cell_coords(cell_i)
-        i2, j2, k2 = self.mesh.get_cell_coords(cell_j)
-        
-        # 获取渗透率
+        # 获取单元属性
         if direction == 'x':
-            K1 = self.permeability[i1, j1, k1, 0]
-            K2 = self.permeability[i2, j2, k2, 0]
-            area = self.mesh.get_face_area('x', i1, j1, k1)
-            distance = self.mesh.get_face_distance('x', i1, j1, k1)
+            K1 = self.property_manager.get_cell_property(cell_i, 'permeability')
+            K2 = self.property_manager.get_cell_property(cell_j, 'permeability')
+            area = self.mesh.get_face_area('x', *self.mesh.get_cell_coords(cell_i))
+            distance = self.mesh.get_face_distance('x', *self.mesh.get_cell_coords(cell_i))
         elif direction == 'y':
-            K1 = self.permeability[i1, j1, k1, 1]
-            K2 = self.permeability[i2, j2, k2, 1]
-            area = self.mesh.get_face_area('y', i1, j1, k1)
-            distance = self.mesh.get_face_distance('y', i1, j1, k1)
+            K1 = self.property_manager.get_cell_property(cell_i, 'permeability')
+            K2 = self.property_manager.get_cell_property(cell_j, 'permeability')
+            area = self.mesh.get_face_area('y', *self.mesh.get_cell_coords(cell_i))
+            distance = self.mesh.get_face_distance('y', *self.mesh.get_cell_coords(cell_i))
         elif direction == 'z':
-            K1 = self.permeability[i1, j1, k1, 2]
-            K2 = self.permeability[i2, j2, k2, 2]
-            area = self.mesh.get_face_area('z', i1, j1, k1)
-            distance = self.mesh.get_face_distance('z', i1, j1, k1)
+            K1 = self.property_manager.get_cell_property(cell_i, 'permeability')
+            K2 = self.property_manager.get_cell_property(cell_j, 'permeability')
+            area = self.mesh.get_face_area('z', *self.mesh.get_cell_coords(cell_i))
+            distance = self.mesh.get_face_distance('z', *self.mesh.get_cell_coords(cell_i))
         else:
             raise ValueError(f"Invalid direction: {direction}")
         
@@ -230,24 +269,6 @@ class SinglePhaseProperties(BasePhysics):
         transmissibility = K_harmonic * area / (self.viscosity * distance)
         
         return transmissibility
-    
-    def update_cell_properties(self, cell: 'Cell', cell_index: int):
-        """
-        更新单元物理属性
-        
-        Args:
-            cell: 单元对象
-            cell_index: 单元索引
-        """
-        i, j, k = self.mesh.get_cell_coords(cell_index)  # i, j , k 对应z,y,x 方向索引
-        
-        # 更新渗透率 - 现在数组维度已经匹配 (i,j,k) = (z,y,x)
-        cell.kx = self.permeability[i, j, k, 0]
-        cell.ky = self.permeability[i, j, k, 1]
-        cell.kz = self.permeability[i, j, k, 2]
-        
-        # 更新孔隙度
-        cell.porosity = self.porosity[i, j, k]
     
     def get_fluid_density(self, pressure: float) -> float:
         """

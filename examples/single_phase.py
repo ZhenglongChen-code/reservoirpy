@@ -32,7 +32,7 @@ from reservoirpy.visualization.plot_3d import create_3d_plotter
 config = {
     'mesh': {
         'nx': 10, 'ny': 1, 'nz': 1,
-        'dx': 1, 'dy': 1, 'dz': 1
+        'dx': 10, 'dy': 10, 'dz': 10
     },
     'physics': {
         'type': 'single_phase',
@@ -77,7 +77,15 @@ well_manager = WellManager(mesh, config['wells'])
 print(well_manager)
 
 # 初始化井（计算产能指数）
-well_manager.initialize_wells(physics.permeability, physics.viscosity)
+# 修改为使用属性管理器获取渗透率
+permeability = physics.property_manager.properties['permeability']
+if isinstance(permeability, float):
+    # 如果是均匀渗透率场，创建一个合适的数组
+    import numpy as np
+    nx, ny, nz = mesh.grid_shape
+    permeability = np.full((nz, ny, nx), permeability)
+
+well_manager.initialize_wells(permeability, physics.viscosity)
 
 # 5. FVM 离散化
 discretizer = FVMDiscretizer(mesh, physics)
