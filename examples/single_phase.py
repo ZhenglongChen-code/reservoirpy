@@ -29,7 +29,7 @@ from reservoirpy.visualization.plot_3d import create_3d_plotter
 # 1. 使用字典配置
 config = {
     'mesh': {
-        'nx': 10, 'ny': 1, 'nz': 1,
+        'nx': 10, 'ny': 10, 'nz': 1,
         'dx': 10, 'dy': 10, 'dz': 10
     },
     'physics': {
@@ -40,12 +40,17 @@ config = {
         'compressibility': 1e-9  # 1/Pa
     },
     'wells': [
-        {'location': [0, 0, 0], 'control_type': 'bhp', 'value': 2000000}  # 只保留一口注入井
+        {'location': [0, 0, 0],      # 井位置
+        'control_type': 'bhp',      # 定井底流压控制
+        'value': 100000,            # 井底流压值（Pa），通常低于地层压力
+        'rw': 0.05,                 # 井筒半径
+        'skin_factor': 0            # 表皮因子
+        }  # 只保留一口生产井
     ],
     'simulation': {
         'dt': 720,           # 时间步长(秒)
-        'total_time': 3600,  # 减少模拟时间
-        'initial_pressure': 3000000 # 初始压力(Pa)
+        'total_time': 36000,  # 减少模拟时间
+        'initial_pressure': 300000 # 初始压力(Pa)
     }
 }
 
@@ -79,7 +84,6 @@ print(well_manager)
 permeability = physics.property_manager.properties['permeability']
 if isinstance(permeability, float):
     # 如果是均匀渗透率场，创建一个合适的数组
-    import numpy as np
     nx, ny, nz = mesh.grid_shape
     permeability = np.full((nz, ny, nx), permeability)
 
@@ -92,7 +96,7 @@ A, b = discretizer.discretize_single_phase(config['simulation']['dt'], pressure,
 print(A.shape, b.shape)
 
 # 简化模拟循环，只运行几个时间步
-for t in range(100):  # 只运行5个时间步进行测试
+for t in range(50):  # 只运行50个时间步进行测试
     print(f"Time step {t}")
     # 6. 模拟
     pressure_new = discretizer.solve_linear_system(A, b)
@@ -103,6 +107,10 @@ for t in range(100):  # 只运行5个时间步进行测试
     if np.any(np.isnan(pressure_new)):
         print("NaN detected! Breaking simulation.")
         break
+        
+    # 更新网格单元中的压力值
+    for i, cell in enumerate(mesh.cell_list):
+        cell.press = pressure_new[i]
         
     # 8. A, b 更新
     A, b = discretizer.discretize_single_phase(config['simulation']['dt'], pressure_new, well_manager)

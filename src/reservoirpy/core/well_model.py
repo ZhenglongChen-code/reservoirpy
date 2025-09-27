@@ -58,62 +58,61 @@ class Well:
                           (float(viscosity) * (math.log(self.re / self.rw) + self.skin_factor)))
         
         return self.well_index
-    
-    def compute_well_term(self, pressure: float, dt: float) -> float:
+
+    def compute_well_term(self, pressure: float) -> float:
         """
         计算井项贡献
-        
+
         Args:
             pressure: 当前压力 (Pa)
-            dt: 时间步长 (s)
-            
+
         Returns:
             井项值
         """
         if self.well_index is None:
             raise ValueError("Well index not computed. Call compute_well_index first.")
-        
+
         if self.control_type == 'bhp':
-            # 定井底流压
+            # 定井底流压: q = PI * (p - bhp)
             bhp = self.value
             return self.well_index * (pressure - bhp)
         elif self.control_type == 'rate':
-            # 定流量
+            # 定流量: 直接返回流量值
             return self.value
         else:
             raise ValueError(f"Unknown control type: {self.control_type}")
-    
-    def add_to_rhs(self, b: np.ndarray, cell_index: int, pressure: float, dt: float):
+
+    def add_to_rhs(self, b: np.ndarray, cell_index: int, pressure: float):
         """
         将井项添加到右端向量
-        
+
         Args:
             b: 右端向量
             cell_index: 井所在单元索引
             pressure: 当前压力
-            dt: 时间步长
         """
-        well_term = self.compute_well_term(pressure, dt)
-        
         if self.control_type == 'bhp':
-            # 定井底流压：从右端项中减去井项
-            b[cell_index] -= well_term * dt
+            # 定井底流压：添加 +PI * bhp 到右端向量
+            # 因为离散方程为: (accumulation + transmissibility) * p_new = accumulation * p_old + q
+            # 对于BHP井: q = PI * (p_new - bhp)，移项后得到: (accumulation + transmissibility + PI) * p_new = accumulation * p_old + PI * bhp
+            b[cell_index] += self.well_index * self.value
         elif self.control_type == 'rate':
-            # 定流量：直接添加到右端项
-            b[cell_index] += well_term * dt
-    
-    def add_to_matrix(self, A, cell_index: int, dt: float):
+            # 定流量：直接添加到右端向量
+            b[cell_index] += self.value
+
+    def add_to_matrix(self, A, cell_index: int):
         """
         将井项添加到系数矩阵（仅用于定井底流压）
-        
+
         Args:
             A: 系数矩阵
             cell_index: 单元索引
-            dt: 时间步长
         """
         if self.control_type == 'bhp':
-            # 定井底流压：需要在系数矩阵对角线上添加井指数项
-            A[cell_index, cell_index] += self.well_index * dt
+            # 定井底流压：在对角线上加上产能指数项
+            # 对应离散方程中的 (accumulation + transmissibility + PI) * p_new 项
+            A[cell_index, cell_index] += self.well_index
+
 
 class WellManager:
     """井管理器类"""
@@ -169,11 +168,11 @@ class WellManager:
             cell_index = self.mesh.get_cell_index(z, y, x)
             well_cells.append(cell_index)
         return well_cells
-    
+
     def apply_well_terms(self, A, b: np.ndarray, pressure: np.ndarray, dt: float):
         """
         将所有井项应用到线性系统
-        
+
         Args:
             A: 系数矩阵
             b: 右端向量
@@ -183,13 +182,13 @@ class WellManager:
         for well in self.wells:
             z, y, x = well.location
             cell_index = self.mesh.get_cell_index(z, y, x)
-            
+
             # 添加井项到右端向量
-            well.add_to_rhs(b, cell_index, pressure[cell_index], dt)
-            
+            well.add_to_rhs(b, cell_index, pressure[cell_index])
+
             # 添加井项到系数矩阵（仅定井底流压）
-            well.add_to_matrix(A, cell_index, dt)
-    
+            well.add_to_matrix(A, cell_index)
+
     def get_well_production(self, pressure: np.ndarray, dt: float) -> Dict[str, float]:
         """
         计算井的生产数据
