@@ -36,31 +36,30 @@ def solve_linear_system(A: csr_matrix, b: np.ndarray,
         return spsolve(A, b)
     elif method == 'cg':
         # 共轭梯度法 (适用于对称正定矩阵)
-        x, info = cg(A, b, tol=tolerance, maxiter=max_iterations)
+        x, info = cg(A, b, rtol=tolerance, maxiter=max_iterations)
         if info != 0:
             warnings.warn(f"CG solver did not converge: info={info}")
         return x
     elif method == 'bicgstab':
-        # 双共轭梯度稳定法
-        x, info = bicgstab(A, b, tol=tolerance, maxiter=max_iterations)
+        x, info = bicgstab(A, b, rtol=tolerance, maxiter=max_iterations)
         if info != 0:
             warnings.warn(f"BiCGSTAB solver did not converge: info={info}")
         return x
     elif method == 'gmres':
         # 广义最小残差法
-        x, info = gmres(A, b, tol=tolerance, maxiter=max_iterations)
+        x, info = gmres(A, b, rtol=tolerance, maxiter=max_iterations)
         if info != 0:
             warnings.warn(f"GMRES solver did not converge: info={info}")
         return x
     elif method == 'lgmres':
         # 重启GMRES
-        x, info = lgmres(A, b, tol=tolerance, maxiter=max_iterations)
+        x, info = lgmres(A, b, rtol=tolerance, maxiter=max_iterations)
         if info != 0:
             warnings.warn(f"LGMRES solver did not converge: info={info}")
         return x
     elif method == 'minres':
         # 最小残差法 (适用于对称矩阵)
-        x, info = minres(A, b, tol=tolerance, maxiter=max_iterations)
+        x, info = minres(A, b, rtol=tolerance, maxiter=max_iterations)
         if info != 0:
             warnings.warn(f"MINRES solver did not converge: info={info}")
         return x
@@ -106,17 +105,17 @@ def solve_linear_system_with_preconditioner(A: csr_matrix, b: np.ndarray,
     
     # 根据方法选择求解器
     if method == 'cg':
-        x, info = cg(A, b, tol=tolerance, maxiter=max_iterations, M=M)
+        x, info = cg(A, b, rtol=tolerance, maxiter=max_iterations, M=M)
         if info != 0:
             warnings.warn(f"CG solver with preconditioner did not converge: info={info}")
         return x
     elif method == 'bicgstab':
-        x, info = bicgstab(A, b, tol=tolerance, maxiter=max_iterations, M=M)
+        x, info = bicgstab(A, b, rtol=tolerance, maxiter=max_iterations, M=M)
         if info != 0:
             warnings.warn(f"BiCGSTAB solver with preconditioner did not converge: info={info}")
         return x
     elif method == 'gmres':
-        x, info = gmres(A, b, tol=tolerance, maxiter=max_iterations, M=M)
+        x, info = gmres(A, b, rtol=tolerance, maxiter=max_iterations, M=M)
         if info != 0:
             warnings.warn(f"GMRES solver with preconditioner did not converge: info={info}")
         return x
@@ -127,8 +126,30 @@ def solve_linear_system_with_preconditioner(A: csr_matrix, b: np.ndarray,
 class LinearSolver:
     """
     线性求解器类
-    
-    封装多种线性求解方法，提供统一接口
+
+    封装多种稀疏线性系统求解方法，提供统一接口。
+
+    支持的求解方法:
+        - ``direct``: 直接求解（超级LU分解），适用于小规模问题
+        - ``cg``: 共轭梯度法，适用于对称正定矩阵
+        - ``bicgstab``: 双共轭梯度稳定法，适用于一般非对称矩阵（默认）
+        - ``gmres``: 广义最小残差法
+        - ``lgmres``: 重启GMRES，适用于大规模问题
+        - ``minres``: 最小残差法，适用于对称矩阵
+
+    支持的预条件子:
+        - ``jacobi``: 对角预条件子
+        - ``ilu``: 不完全LU分解预条件子
+
+    Attributes:
+        method: 求解方法名称
+        tolerance: 收敛容差
+        max_iterations: 最大迭代次数
+        preconditioner: 预条件子类型
+
+    Example:
+        >>> solver = LinearSolver({'method': 'bicgstab', 'tolerance': 1e-10})
+        >>> x = solver.solve(A, b)
     """
     
     def __init__(self, config: Dict[str, Any] = None):

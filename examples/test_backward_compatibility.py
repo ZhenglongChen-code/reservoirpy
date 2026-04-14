@@ -3,10 +3,6 @@
 
 测试新架构是否与旧的使用方式兼容
 """
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 import numpy as np
 from reservoirpy import (
     ReservoirSimulator,
@@ -134,7 +130,10 @@ def test_direct_component_usage():
     print(f"Assembled system: A shape {A.shape}, b shape {b.shape}")
     
     # 5. 求解
-    pressure_new = discretizer.solve_linear_system(A, b)
+    from reservoirpy.core.linear_solver import LinearSolver
+    
+    solver = LinearSolver()
+    pressure_new = solver.solve(A, b)
     print(f"Solved pressure range: {np.min(pressure_new)/1000:.1f} - {np.max(pressure_new)/1000:.1f} kPa")
     
     print("✓ 直接组件使用测试通过")

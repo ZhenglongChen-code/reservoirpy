@@ -18,8 +18,24 @@ from .well_model import WellManager
 class FVMDiscretizer:
     """
     有限体积法离散化器
-    
-    实现单相流和两相流的有限体积法离散化
+
+    将渗流微分方程离散化为线性系统 Ax=b。
+
+    支持的离散化:
+        - 单相流: discretize_single_phase()
+        - 两相流: discretize_two_phase() (待实现)
+
+    内部使用 COO 稀疏矩阵格式批量构建，最终转为 CSR 格式供求解器使用。
+
+    Attributes:
+        mesh: 结构化网格对象
+        physics: 物理属性对象（单相或两相）
+        total_cells: 总单元数
+        trans_matrix: 传导率矩阵，形状 (6, n_cells)，6个方向 [W, E, N, S, B, T]
+
+    Example:
+        >>> discretizer = FVMDiscretizer(mesh, physics)
+        >>> A, b = discretizer.discretize_single_phase(dt, pressure, well_manager)
     """
     
     def __init__(self, mesh: StructuredMesh, physics: BasePhysics):
@@ -115,90 +131,62 @@ class FVMDiscretizer:
     
     def discretize_single_phase(self, dt: float, pressure: np.ndarray, 
                                well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
-        """
-        单相流FVM离散化 - 使用有限体积法离散微分方程
+        from scipy.sparse import coo_matrix, lil_matrix
         
-        原始微分方程：
-        ∂/∂t(φ·ρ) + ∇·(ρ·v) = q
+        n = self.total_cells
+        b = np.zeros(n)
         
-        其中 v = -(k/μ)·∇p (达西定律)
+        compressibility = getattr(self.physics, 'compressibility', 1e-9)
         
-        对于微可压缩流体，结合连续性方程得到压力方程：
-        φ·c·∂p/∂t = ∇·(k/μ·∇p) + q/ρ
+        porosity = np.array([
+            self.physics.property_manager.get_cell_property(i, 'porosity')
+            for i in range(n)
+        ])
+        volumes = np.array([float(self.mesh.cell_list[i].volume) for i in range(n)])
         
-        FVM积分形式（对控制体积V积分）：
-        ∫∫∫_V φ·c·∂p/∂t dV = ∫∫∫_V ∇·(k/μ·∇p) dV + ∫∫∫_V q/ρ dV
+        acc_coeff = volumes * porosity * compressibility / dt
+        b = acc_coeff * pressure
         
-        应用散度定理和中点规则离散化：
-        V·φ·c·(p^{n+1} - p^n)/Δt = Σ_faces T_face·(p_neighbor - p_center) + Q_well
+        rows = []
+        cols = []
+        data = []
         
-        重组为线性系统 A·p^{n+1} = b：
-        [V·φ·c/Δt + Σ_faces T_face]·p_i^{n+1} - Σ_neighbors T_ij·p_j^{n+1} = V·φ·c·p_i^n/Δt + Q_well
+        diag = acc_coeff.copy()
         
-        Args:
-            dt: 时间步长 Δt
-            pressure: 当前时间步压力场 p^n
-            well_manager: 井管理器
-            
-        Returns:
-            (系数矩阵A, 右端向量b)
-        """
-        # 直接使用稀疏矩阵初始化，提高内存效率
-        # 使用COO格式构建矩阵，便于增量更新
-        from scipy.sparse import lil_matrix
-        A = lil_matrix((self.total_cells, self.total_cells))
-        b = np.zeros(self.total_cells)
-        
-        # 对每个控制体积（网格单元）应用FVM离散化
-        for i in range(self.total_cells):
-            cell = self.mesh.cell_list[i]
-            z, y, x = self.mesh.get_cell_coords(i)
-            
-            # ====== 1. 累积项离散化 ======
-            # 原始项: ∫∫∫_V φ·c·∂p/∂t dV ≈ V·φ·c·(p^{n+1} - p^n)/Δt
-            # 系数矩阵贡献: V·φ·c/Δt (对角项)
-            compressibility = getattr(self.physics, 'compressibility', 1e-9)  # 默认值
+        for direction in range(6):
+            trans = self.trans_matrix[direction]
+            mask = trans != 0.0
+            if not np.any(mask):
+                continue
                 
-            # 从属性管理器获取孔隙度
-            porosity = self.physics.property_manager.get_cell_property(i, 'porosity')
-                
-            accumulation_coeff = (float(cell.volume) * float(porosity) * 
-                                 float(compressibility) / dt)
+            cell_indices = np.where(mask)[0]
+            trans_vals = trans[cell_indices]
             
-            A[i, i] += accumulation_coeff  # 对角项: V·φ·c/Δt
+            neighbors = np.array([
+                self.mesh.cell_list[i].neighbors[direction] 
+                for i in cell_indices
+            ])
             
-            # 右端向量贡献: V·φ·c·p^n/Δt (前一时间步的贡献)
-            b[i] += accumulation_coeff * float(pressure[i])
+            valid = neighbors != -1
+            cell_indices = cell_indices[valid]
+            trans_vals = trans_vals[valid]
+            neighbor_indices = neighbors[valid]
             
-            # ====== 2. 扩散项离散化 ======
-            # 原始项: ∫∫∫_V ∇·(k/μ·∇p) dV
-            # 应用散度定理: ∫∫_∂V (k/μ·∇p)·n̂ dA
-            # 离散化: Σ_faces T_face·(p_neighbor - p_center)
-            # 其中 T_face = k_harmonic·A_face/(μ·d_face) 是传导率
+            rows.extend(cell_indices.tolist())
+            cols.extend(neighbor_indices.tolist())
+            data.extend((-trans_vals).tolist())
             
-            neighbors = self.mesh.get_neighbors(z, y, x)
-            total_transmissibility = 0.0
-            
-            for direction, neighbor_idx in enumerate(neighbors):
-                if neighbor_idx != -1:  # 内部界面
-                    # 传导率 T_ij = k_harmonic·A_ij/(μ·d_ij)
-                    trans = self.trans_matrix[direction, i]
-                    total_transmissibility += trans
-                    
-                    # 非对角项: -T_ij·p_j (相邻单元的贡献)
-                    # 来自 T_ij·(p_j - p_i) 中的 T_ij·p_j 项
-                    A[i, neighbor_idx] -= trans
-                # else: 边界界面，零通量边界条件（不需要额外处理）
-            
-            # 对角项: +Σ_faces T_face (来自 -T_ij·(-p_i) = +T_ij·p_i)
-            A[i, i] += total_transmissibility
+            np.add.at(diag, cell_indices, trans_vals)
         
-        # ====== 3. 应用井项 ======
-        # Q_well 项通过井管理器添加到线性系统中
-        well_manager.apply_well_terms(A, b, pressure, dt)
+        rows.extend(range(n))
+        cols.extend(range(n))
+        data.extend(diag.tolist())
         
-        # ====== 4. 转换为CSR格式提高求解效率 ======
-        A_csr = A.tocsr()
+        A = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
+        
+        A_lil = A.tolil()
+        well_manager.apply_well_terms(A_lil, b, pressure, dt)
+        A_csr = A_lil.tocsr()
         
         return A_csr, b
     
@@ -253,44 +241,7 @@ class FVMDiscretizer:
         properties['sparsity'] = 1.0 - nonzero_ratio
         
         return properties
-    
-    
-    def solve_linear_system(self, A: csr_matrix, b: np.ndarray, 
-                           method: str = 'bicgstab', 
-                           tolerance: float = 1e-8,
-                           max_iterations: int = 1000) -> np.ndarray:
-        """
-        求解线性系统
-        
-        Args:
-            A: 系数矩阵
-            b: 右端向量
-            method: 求解方法
-            tolerance: 收敛容差
-            max_iterations: 最大迭代次数
-            
-        Returns:
-            解向量
-        """
-        if method == 'direct':
-            # 直接求解
-            solution = spsolve(A, b)
-            return np.array(solution)  # 确保返回numpy数组
-        elif method == 'cg':
-            # 共轭梯度法 - 使用正确的参数名称
-            x, info = cg(A, b, rtol=tolerance, maxiter=max_iterations)
-            if info != 0:
-                warnings.warn(f"CG solver did not converge: info={info}")
-            return x
-        elif method == 'bicgstab':
-            # 双共轭梯度稳定法 - 使用正确的参数名称
-            x, info = bicgstab(A, b, rtol=tolerance, maxiter=max_iterations)
-            if info != 0:
-                warnings.warn(f"BiCGSTAB solver did not converge: info={info}")
-            return x
-        else:
-            raise ValueError(f"Unknown solver method: {method}")
-    
+
     def discretize_two_phase(self, dt: float, pressure: np.ndarray, 
                             saturation: np.ndarray,
                             wells: List[Dict[str, Any]]) -> Tuple[csr_matrix, np.ndarray]:

@@ -151,23 +151,19 @@ class BaseCell(ABC):
         self.volume = volume
         self.neighbors = []  # 邻居列表，大小取决于单元类型
         self.boundary_type = None
-        
-        # 几何属性
-        self.vertices = []  # 顶点列表，大小取决于单元类型
-        
-        # 物理属性（将在physics模块中设置）
+
+        self.vertices = []
+
         self.porosity = 0.0
         self.kx = 0.0
         self.ky = 0.0
         self.kz = 0.0
-        self.trans = []  # 传导率列表，大小取决于单元类型
-        
-        # 边界和井条件
+        self.trans = []
+
         self.mark_bc = 0
         self.markwell = 0
         self.well_id = -1
-        
-        # 流体属性
+
         self.press = 0.0
         self.Sw = 0.0
         self.So = 0.0
@@ -402,41 +398,58 @@ class StructuredMesh(BaseMesh):
         else:
             raise ValueError(f"Invalid direction: {direction}")
     
-    def get_neighbors(self, i: int, j: int, k: int) -> List[int]:
+    def get_neighbors(self, i_or_index, j=None, k=None) -> List[int]:
         """
         获取相邻单元索引
-        
+
+        支持两种调用方式:
+        - get_neighbors(cell_index: int) -> BaseMesh接口
+        - get_neighbors(i, j, k) -> 结构化网格接口
+
         Args:
-            i: Z方向索引
-            j: Y方向索引
-            k: X方向索引
-            
+            i_or_index: Z方向索引 或 一维单元索引
+            j: Y方向索引（可选）
+            k: X方向索引（可选）
+
         Returns:
             相邻单元索引列表 [W, E, N, S, F, B]
         """
+        if j is None and k is None:
+            i, j, k = self.get_cell_coords(i_or_index)
+        else:
+            i = i_or_index
+
         idx = i * self.nx * self.ny + j * self.nx + k
         cell = self.cell_list[idx]
         return cell.neighbors.copy()
     
-    def is_boundary_cell(self, i: int, j: int, k: int) -> bool:
+    def is_boundary_cell(self, i_or_index, j=None, k=None) -> bool:
         """
         判断是否为边界单元
-        
+
+        支持两种调用方式:
+        - is_boundary_cell(cell_index: int) -> BaseMesh接口
+        - is_boundary_cell(i, j, k) -> 结构化网格接口
+
         Args:
-            i: Z方向索引
-            j: Y方向索引
-            k: X方向索引
-            
+            i_or_index: Z方向索引 或 一维单元索引
+            j: Y方向索引（可选）
+            k: X方向索引（可选）
+
         Returns:
             是否为边界单元
         """
-        # 对于2D网格（nz=1），只检查x和y方向的边界
+        if j is None and k is None:
+            i, j, k = self.get_cell_coords(i_or_index)
+        else:
+            i = i_or_index
+
         if self.nz == 1:
-            return (j == 0 or j == self.ny - 1 or 
+            return (j == 0 or j == self.ny - 1 or
                     k == 0 or k == self.nx - 1)
         else:
-            return (i == 0 or i == self.nz - 1 or 
-                    j == 0 or j == self.ny - 1 or 
+            return (i == 0 or i == self.nz - 1 or
+                    j == 0 or j == self.ny - 1 or
                     k == 0 or k == self.nx - 1)
     
     def get_cell_index(self, i: int, j: int, k: int) -> int:

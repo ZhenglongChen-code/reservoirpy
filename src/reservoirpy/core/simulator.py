@@ -7,6 +7,7 @@
 
 import yaml
 import numpy as np
+import logging
 from typing import Dict, Any, Optional, List, Union
 from reservoirpy.mesh.mesh import StructuredMesh
 from reservoirpy.physics.physics import SinglePhaseProperties, TwoPhaseProperties
@@ -15,18 +16,32 @@ from .output_manager import OutputManager
 from ..models.model_factory import ModelFactory
 from ..models.base_model import BaseModel
 
+logger = logging.getLogger(__name__)
+
 
 class ReservoirSimulator:
     """
-    油藏数值模拟器主类
-    
-    采用策略模式，将具体的数学模型委托给Model对象处理。
-    职责：
-    1. 配置管理和验证
-    2. 基础组件初始化（网格、物理属性、井）
-    3. 模型创建和委托
-    4. 模拟流程控制
-    5. 结果管理和输出
+    油藏模拟器顶层接口
+
+    提供配置驱动的模拟流程，自动创建和管理 Mesh、Physics、Model、WellManager 等组件。
+
+    使用方式:
+        1. 从 YAML 文件创建: ReservoirSimulator('config.yaml')
+        2. 从字典创建: ReservoirSimulator(config_dict={...})
+
+    支持的物理模型:
+        - single_phase: 单相流
+        - two_phase_impes: 两相流IMPES
+        - two_phase_fim: 两相流全隐式
+
+    Example:
+        >>> sim = ReservoirSimulator(config_dict={
+        ...     'mesh': {'nx': 10, 'ny': 10, 'nz': 1, 'dx': 10, 'dy': 10, 'dz': 10},
+        ...     'physics': {'type': 'single_phase', 'permeability': 100, ...},
+        ...     'wells': [...],
+        ...     'simulation': {'dt': 86400, 'total_time': 864000, ...}
+        ... })
+        >>> results = sim.run_simulation()
     """
     
     def __init__(self, config_path: Optional[str] = None, config_dict: Optional[Dict[str, Any]] = None):
@@ -57,9 +72,9 @@ class ReservoirSimulator:
         # 为了向后兼容保留的属性
         self.wells = self.well_manager.wells
         
-        print(f"Created ReservoirSimulator with {model_type} model")
-        print(f"Mesh: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz} = {self.mesh.n_cells} cells")
-        print(f"Wells: {len(self.wells)}")
+        logger.info(f"Created ReservoirSimulator with {model_type} model")
+        logger.info(f"Mesh: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz} = {self.mesh.n_cells} cells")
+        logger.info(f"Wells: {len(self.wells)}")
     
     def _load_config(self, config_path: Optional[str], config_dict: Optional[Dict]) -> Dict[str, Any]:
         """
@@ -198,12 +213,12 @@ class ReservoirSimulator:
         total_time = sim_config['total_time']
         
         # 委托给模型执行求解
-        print("Starting reservoir simulation...")
+        logger.info("Starting reservoir simulation...")
         results = self.model.solve_simulation(
             initial_state, dt, total_time, 
             self.well_manager, self.output_manager)
             
-        print("Simulation completed successfully")
+        logger.info("Simulation completed successfully")
         return results
         
     def run_steady_state(self) -> Dict[str, np.ndarray]:

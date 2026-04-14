@@ -12,21 +12,17 @@
 孔隙度：$\phi = 0.2$；
 源汇项：$q = 0$（无注入或生产）。
 """
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 import numpy as np
 from reservoirpy import (
-    ReservoirSimulator,
     SinglePhaseProperties,
     StructuredMesh,
     WellManager,
     validate_well_config,
 )
 from reservoirpy.core.discretization import FVMDiscretizer
+from reservoirpy.core.linear_solver import LinearSolver
 from reservoirpy.visualization.plot_3d import create_3d_plotter
-# 1. 使用字典配置
+
 config = {
     'mesh': {
         'nx': 10, 'ny': 10, 'nz': 1,
@@ -34,42 +30,33 @@ config = {
     },
     'physics': {
         'type': 'single_phase',
-        'permeability': 10.0,  # mD
+        'permeability': 10.0,
         'porosity': 0.2,
-        'viscosity': 0.001,     # Pa·s
-        'compressibility': 1e-9  # 1/Pa
+        'viscosity': 0.001,
+        'compressibility': 1e-9
     },
     'wells': [
-        {'location': [0, 0, 0],      # 井位置
-        'control_type': 'bhp',      # 定井底流压控制
-        'value': 100000,            # 井底流压值（Pa），通常低于地层压力
-        'rw': 0.05,                 # 井筒半径
-        'skin_factor': 0            # 表皮因子
-        }  # 只保留一口生产井
+        {'location': [0, 0, 0],
+        'control_type': 'bhp',
+        'value': 100000,
+        'rw': 0.05,
+        'skin_factor': 0}
     ],
     'simulation': {
-        'dt': 720,           # 时间步长(秒)
-        'total_time': 36000,  # 减少模拟时间
-        'initial_pressure': 300000 # 初始压力(Pa)
+        'dt': 720,
+        'total_time': 36000,
+        'initial_pressure': 300000
     }
 }
 
-# 2. 生成网格
 mesh_config = config['mesh']
 mesh = StructuredMesh(**mesh_config)
 print(mesh)
 
-# 3. 生成物理场
 physics_config = config['physics']
 physics = SinglePhaseProperties(mesh, physics_config)
 print(physics)
 
-# plotter_3d = create_3d_plotter(mesh)
-# permeability_plotter = plotter_3d.plot_permeability_field_3d(physics.permeability[:, :, :, 0], "3D Permeability Field")
-# permeability_plotter.show()
-
-# 4. 初始化井管理器 (WellManager)
-# 验证井配置是否有效
 for well_config in config['wells']:
     if not validate_well_config(well_config, mesh):
         print("Invalid well configuration:", well_config)
@@ -79,46 +66,35 @@ for well_config in config['wells']:
 well_manager = WellManager(mesh, config['wells'])
 print(well_manager)
 
-# 初始化井（计算产能指数）
-# 修改为使用属性管理器获取渗透率
 permeability = physics.property_manager.properties['permeability']
 if isinstance(permeability, float):
-    # 如果是均匀渗透率场，创建一个合适的数组
     nx, ny, nz = mesh.grid_shape
     permeability = np.full((nz, ny, nx), permeability)
 
 well_manager.initialize_wells(permeability, physics.viscosity)
 
-# 5. FVM 离散化
 discretizer = FVMDiscretizer(mesh, physics)
+solver = LinearSolver()
+
 pressure = np.ones(mesh.n_cells) * config['simulation']['initial_pressure']
 A, b = discretizer.discretize_single_phase(config['simulation']['dt'], pressure, well_manager)
 print(A.shape, b.shape)
 
-# 简化模拟循环，只运行几个时间步
-for t in range(50):  # 只运行50个时间步进行测试
+for t in range(50):
     print(f"Time step {t}")
-    # 6. 模拟
-    pressure_new = discretizer.solve_linear_system(A, b)
-    # 7. 输出结果
+    pressure_new = solver.solve(A, b)
     print("Pressure:", pressure_new)
-    
-    # 检查是否有nan值
+
     if np.any(np.isnan(pressure_new)):
         print("NaN detected! Breaking simulation.")
         break
-        
-    # 更新网格单元中的压力值
+
     for i, cell in enumerate(mesh.cell_list):
         cell.press = pressure_new[i]
-        
-    # 8. A, b 更新
+
     A, b = discretizer.discretize_single_phase(config['simulation']['dt'], pressure_new, well_manager)
     pressure = pressure_new.copy()
 
 plotter_3d = create_3d_plotter(mesh)
 pv_plotter = plotter_3d.plot_pressure_field_3d(pressure_new, "3D Pressure Field")
 pv_plotter.show()
-
-
-

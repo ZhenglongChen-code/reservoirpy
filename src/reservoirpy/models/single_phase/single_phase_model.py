@@ -6,11 +6,14 @@
 
 from typing import Dict, List, Tuple
 import numpy as np
+import logging
 from scipy.sparse import csr_matrix
 
 from ..base_model import BaseModel
 from ...core.discretization import FVMDiscretizer
 from ...core.linear_solver import LinearSolver
+
+logger = logging.getLogger(__name__)
 
 
 class SinglePhaseModel(BaseModel):
@@ -47,7 +50,7 @@ class SinglePhaseModel(BaseModel):
         solver_config = config.get('linear_solver', {})
         self.solver = LinearSolver(solver_config)
         
-        print(f"Initialized SinglePhaseModel: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz}")
+        logger.info(f"Initialized SinglePhaseModel: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz}")
         
     def get_state_variables(self) -> List[str]:
         """
@@ -136,12 +139,12 @@ class SinglePhaseModel(BaseModel):
         
         # 检查是否有NaN或无穷大值
         if np.any(np.isnan(pressure)) or np.any(np.isinf(pressure)):
-            print("Error: NaN or Inf values in pressure field")
+            logger.error("Error: NaN or Inf values in pressure field")
             return False
             
         # 检查压力是否为正数
         if np.any(pressure <= 0):
-            print("Error: Non-positive pressure values detected")
+            logger.error("Error: Non-positive pressure values detected")
             return False
             
         # 检查压力范围是否合理（0.1 MPa 到 100 MPa）
@@ -149,9 +152,9 @@ class SinglePhaseModel(BaseModel):
         max_pressure = 100e6  # 100 MPa
         
         if np.any(pressure < min_pressure) or np.any(pressure > max_pressure):
-            print(f"Warning: Pressure out of expected range "
+            logger.warning(f"Warning: Pressure out of expected range "
                   f"[{min_pressure/1e6:.1f}, {max_pressure/1e6:.1f}] MPa")
-            print(f"Current range: [{np.min(pressure)/1e6:.2f}, {np.max(pressure)/1e6:.2f}] MPa")
+            logger.warning(f"Current range: [{np.min(pressure)/1e6:.2f}, {np.max(pressure)/1e6:.2f}] MPa")
             # 这里只是警告，不返回False，因为某些情况下可能确实需要极端压力值
             
         return True
@@ -215,7 +218,7 @@ class SinglePhaseModel(BaseModel):
         # 使用很大的时间步长求解稳态
         dt_steady = 1e20
         
-        print("Solving steady state...")
+        logger.info("Solving steady state...")
         
         # 组装和求解稳态系统
         A, b = self.assemble_system(dt_steady, state_vars, well_manager)
@@ -225,7 +228,7 @@ class SinglePhaseModel(BaseModel):
         
         # 验证稳态解
         if self.validate_solution(steady_state):
-            print("Steady state solution converged")
+            logger.info("Steady state solution converged")
             return steady_state
         else:
             raise RuntimeError("Steady state solution validation failed")

@@ -23,9 +23,14 @@
 - 理论背景：reservoir_sim/docs/theory/
 """
 
+import logging
+
 __version__ = "0.1.0"
 __author__ = "Reservoir Simulation Team"
 __email__ = "reservoir@example.com"
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 # 导入主要类
 from reservoirpy.mesh.mesh import StructuredMesh, CubeCell, Node

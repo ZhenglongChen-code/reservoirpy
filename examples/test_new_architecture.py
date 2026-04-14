@@ -3,10 +3,6 @@
 
 测试新的BaseModel架构和ModelFactory工厂模式
 """
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 import numpy as np
 from reservoirpy.core.simulator import ReservoirSimulator
 from reservoirpy.models.model_factory import ModelFactory

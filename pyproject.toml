@@ -1,27 +1,58 @@
 [project]
 name = "reservoirpy"
 version = "0.1.0"
-description = "Lightweight reservoir simulator"
+description = "Lightweight modular reservoir simulator"
 readme = "README.md"
 authors = [{ name = "Zhenglong Chen", email = "chenzhenglomg0514@163.com" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
+
 dependencies = [
-    "numpy",
-    "scipy",
-    "matplotlib",
-    "pyyaml>=6.0.2",
-    "pyvista>=0.46.3",
-    "pandas>=2.3.2",
-    "jupyter>=1.1.1",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+viz = [
+    "pyvista>=0.42",
+    "pandas>=2.0",
+]
 dev = [
-    "pytest",
-    "black",
-    "jupyter",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1",
+    "mkdocs>=1.5",
+    "mkdocstrings[python]>=0.24",
+    "mkdocs-material>=9.0",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+    "mkdocs-section-index>=0.3",
+]
+notebook = [
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reservoirpy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

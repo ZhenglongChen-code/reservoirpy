@@ -107,7 +107,7 @@ class NewtonRaphsonSolver:
         if self.linear_solver == 'direct':
             return spsolve(A, b)
         elif self.linear_solver == 'bicgstab':
-            x, info = bicgstab(A, b, tol=self.linear_tolerance, 
+            x, info = bicgstab(A, b, rtol=self.linear_tolerance, 
                               maxiter=self.linear_max_iterations)
             if info != 0:
                 warnings.warn(f"Linear solver did not converge: info={info}")

@@ -317,8 +317,9 @@ class TwoPhaseProperties(SinglePhaseProperties):
         super().__init__(mesh, config)
         
         # 两相流特有属性
-        self.mu_o = config.get('oil_viscosity', 2e-3)  # 油相粘度
-        self.mu_w = config.get('water_viscosity', 1e-3)  # 水相粘度
+        self.mu_o = config.get('oil_viscosity', 2e-3)
+        self.mu_w = config.get('water_viscosity', 1e-3)
+        self.viscosity = self.mu_w
         
         # 相对渗透率模型
         self.kro_model = config.get('kro_model', 'corey')

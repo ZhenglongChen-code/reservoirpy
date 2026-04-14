@@ -47,28 +47,39 @@ class OutputManager:
             self.results['field_data']['temperature'] = []
     
     def save_timestep(self, timestep: int, current_time: float, 
-                     state_vars: Dict[str, np.ndarray]):
+                     state_vars: Dict[str, np.ndarray],
+                     well_manager=None):
         """
         保存时间步结果
-        
+
         Args:
             timestep: 时间步编号
             current_time: 当前时间
             state_vars: 状态变量字典
+            well_manager: 井管理器（可选）
         """
-        # 保存时间信息
         self.results['time_history'].append(current_time)
         self.results['timestep_history'].append(timestep)
-        
-        # 保存场变量
+
         for var_name, var_data in state_vars.items():
             if var_name in self.results['field_data']:
                 self.results['field_data'][var_name].append(var_data.copy())
-        
-        # TODO: 保存井数据
-        if self.save_well_data:
-            # 这里可以添加井数据的保存逻辑
-            pass
+
+        if self.save_well_data and well_manager is not None:
+            well_data = {}
+            for i, well in enumerate(well_manager.wells):
+                z, y, x = well.location
+                cell_index = well_manager.mesh.get_cell_index(z, y, x)
+                well_data[f'well_{i}'] = {
+                    'location': well.location,
+                    'control_type': well.control_type,
+                    'value': well.value,
+                    'cell_index': cell_index
+                }
+                for var_name, var_data in state_vars.items():
+                    if cell_index < len(var_data):
+                        well_data[f'well_{i}'][var_name] = float(var_data[cell_index])
+            self.results['well_data'].append(well_data)
     
     def get_results(self) -> Dict[str, Any]:
         """

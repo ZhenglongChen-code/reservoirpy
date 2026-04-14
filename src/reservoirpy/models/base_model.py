@@ -7,15 +7,43 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Tuple
 import numpy as np
+import logging
 from scipy.sparse import csr_matrix
+
+logger = logging.getLogger(__name__)
 
 
 class BaseModel(ABC):
     """
-    油藏数值模拟模型抽象基类
-    
-    采用模板方法模式，定义求解的通用流程，
-    具体的数学计算由子类实现。
+    数学模型抽象基类
+
+    定义了所有物理模型必须实现的接口，采用 Strategy 模式与 ReservoirSimulator 集成。
+
+    子类必须实现:
+        - get_state_variables(): 返回状态变量名列表
+        - initialize_state(): 初始化状态变量
+        - assemble_system(): 组装线性系统
+        - solve_timestep(): 求解一个时间步
+        - update_properties(): 更新物理属性
+        - validate_solution(): 验证解的合理性
+
+    已实现的子类:
+        - SinglePhaseModel: 单相流模型
+        - TwoPhaseIMPES: 两相流IMPES模型
+        - TwoPhaseFIM: 两相流全隐式模型
+
+    Attributes:
+        mesh: 结构化网格对象
+        physics: 物理属性对象
+        config: 模型配置字典
+        dt: 时间步长
+        tolerance: 收敛容差
+        max_iterations: 最大迭代次数
+
+    Example:
+        >>> model = SinglePhaseModel(mesh, physics, config)
+        >>> state = model.initialize_state({'initial_pressure': 30e6})
+        >>> new_state = model.solve_timestep(dt, state, well_manager)
     """
     
     def __init__(self, mesh, physics, config: Dict[str, Any]):
@@ -155,9 +183,9 @@ class BaseModel(ABC):
         self.update_properties(state_vars)
         
         # 保存初始状态
-        output_manager.save_timestep(0, current_time, state_vars)
+        output_manager.save_timestep(0, current_time, state_vars, well_manager)
         
-        print(f"Starting simulation: dt={dt:.0f}s, total_time={total_time:.0f}s")
+        logger.info(f"Starting simulation: dt={dt:.0f}s, total_time={total_time:.0f}s")
         
         while current_time < total_time:
             time_step += 1
@@ -176,14 +204,14 @@ class BaseModel(ABC):
                 
                 # 保存结果
                 if time_step % output_manager.output_interval == 0:
-                    output_manager.save_timestep(time_step, current_time, state_vars)
-                    print(f"Timestep {time_step}: t={current_time:.1f}s")
+                    output_manager.save_timestep(time_step, current_time, state_vars, well_manager)
+                    logger.info(f"Timestep {time_step}: t={current_time:.1f}s")
                     
             except Exception as e:
-                print(f"Error at timestep {time_step}: {e}")
+                logger.error(f"Error at timestep {time_step}: {e}")
                 break
                 
-        print(f"Simulation completed: {time_step} timesteps")
+        logger.info(f"Simulation completed: {time_step} timesteps")
         return output_manager.get_results()
         
     def get_model_info(self) -> Dict[str, Any]:

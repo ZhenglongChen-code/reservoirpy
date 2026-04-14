@@ -5,7 +5,10 @@
 """
 
 from typing import Dict, Any, Type
+import logging
 from .base_model import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class ModelFactory:
@@ -27,7 +30,7 @@ class ModelFactory:
             model_class: 模型类
         """
         cls._registry[model_type] = model_class
-        print(f"Registered model: {model_type} -> {model_class.__name__}")
+        logger.debug(f"Registered model: {model_type} -> {model_class.__name__}")
         
     @classmethod
     def create_model(cls, model_type: str, mesh, physics, config: Dict[str, Any]) -> BaseModel:
@@ -84,20 +87,19 @@ def register_builtin_models():
         from .single_phase.single_phase_model import SinglePhaseModel
         ModelFactory.register('single_phase', SinglePhaseModel)
     except ImportError:
-        print("Warning: SinglePhaseModel not available")
-        
-    # 暂时注释掉未实现的两相流模型
-    # try:
-    #     from .two_phase.impes_model import IMPESModel
-    #     ModelFactory.register('two_phase_impes', IMPESModel)
-    # except ImportError:
-    #     print("Warning: IMPESModel not available")
-        
-    # try:
-    #     from .two_phase.fim_model import FIMModel
-    #     ModelFactory.register('two_phase_fim', FIMModel)
-    # except ImportError:
-    #     print("Warning: FIMModel not available")
+        logger.warning("SinglePhaseModel not available")
+
+    try:
+        from .two_phase_impes import TwoPhaseIMPES
+        ModelFactory.register('two_phase_impes', TwoPhaseIMPES)
+    except ImportError:
+        logger.warning("TwoPhaseIMPES not available")
+
+    try:
+        from .two_phase_fim import TwoPhaseFIM
+        ModelFactory.register('two_phase_fim', TwoPhaseFIM)
+    except ImportError:
+        logger.warning("TwoPhaseFIM not available")
 
 
 # 自动注册内置模型

@@ -60,25 +60,15 @@ class Well:
         return self.well_index
 
     def compute_well_term(self, pressure: float) -> float:
-        """
-        计算井项贡献
+        if self.control_type == 'rate':
+            return self.value
 
-        Args:
-            pressure: 当前压力 (Pa)
-
-        Returns:
-            井项值
-        """
         if self.well_index is None:
             raise ValueError("Well index not computed. Call compute_well_index first.")
 
         if self.control_type == 'bhp':
-            # 定井底流压: q = PI * (p - bhp)
             bhp = self.value
             return self.well_index * (pressure - bhp)
-        elif self.control_type == 'rate':
-            # 定流量: 直接返回流量值
-            return self.value
         else:
             raise ValueError(f"Unknown control type: {self.control_type}")
 
@@ -207,8 +197,7 @@ class WellManager:
             cell_index = self.mesh.get_cell_index(z, y, x)
             
             if well.control_type == 'bhp':
-                # 定井底流压：计算流量
-                well_term = well.compute_well_term(pressure[cell_index], dt)
+                well_term = well.compute_well_term(pressure[cell_index])
                 production[f'well_{i+1}_rate'] = well_term
                 production[f'well_{i+1}_bhp'] = well.value
             else:
