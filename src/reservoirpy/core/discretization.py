@@ -242,28 +242,83 @@ class FVMDiscretizer:
         
         return properties
 
-    def discretize_two_phase(self, dt: float, pressure: np.ndarray, 
+    def discretize_two_phase(self, dt: float, pressure: np.ndarray,
                             saturation: np.ndarray,
-                            wells: List[Dict[str, Any]]) -> Tuple[csr_matrix, np.ndarray]:
-        """
-        离散化两相流方程（IMPES方法）
-        
-        Args:
-            dt: 时间步长
-            pressure: 当前压力场
-            saturation: 当前饱和度场
-            wells: 井配置列表
-            
-        Returns:
-            (系数矩阵, 右端向量)
-        """
-        # 这里实现两相流的离散化
-        # 暂时简化处理，需要创建临时井管理器
-        from .well_model import WellManager
-        temp_well_manager = WellManager(self.mesh, wells)
-        temp_well_manager.initialize_wells(getattr(self.physics, 'permeability', np.ones((1,1,1,3))), 
-                                          getattr(self.physics, 'viscosity', 0.001))
-        return self.discretize_single_phase(dt, pressure, temp_well_manager)
+                            well_manager) -> Tuple[csr_matrix, np.ndarray]:
+        from scipy.sparse import coo_matrix, lil_matrix
+
+        n = self.total_cells
+        physics = self.physics
+
+        lambda_w = np.zeros(n)
+        lambda_o = np.zeros(n)
+        for i in range(n):
+            Sw = saturation[i]
+            kro = physics.get_relative_permeability(Sw, 'oil')
+            krw = physics.get_relative_permeability(Sw, 'water')
+            lambda_w[i] = krw / physics.mu_w
+            lambda_o[i] = kro / physics.mu_o
+        lambda_t = lambda_w + lambda_o
+
+        porosity = np.array([
+            physics.property_manager.get_cell_property(i, 'porosity')
+            for i in range(n)
+        ])
+        volumes = np.array([float(self.mesh.cell_list[i].volume) for i in range(n)])
+        compressibility = getattr(physics, 'compressibility', 1e-9)
+
+        acc_coeff = volumes * porosity * compressibility / dt
+        b = acc_coeff * pressure
+
+        rows = []
+        cols = []
+        data = []
+        diag = acc_coeff.copy()
+
+        for direction in range(6):
+            trans = self.trans_matrix[direction]
+            mask = trans != 0.0
+            if not np.any(mask):
+                continue
+
+            cell_indices = np.where(mask)[0]
+            trans_vals = trans[cell_indices]
+
+            neighbors = np.array([
+                self.mesh.cell_list[i].neighbors[direction]
+                for i in cell_indices
+            ])
+
+            valid = neighbors != -1
+            ci = cell_indices[valid]
+            tv = trans_vals[valid]
+            ni = neighbors[valid]
+
+            for idx in range(len(ci)):
+                i_cell = ci[idx]
+                j_cell = ni[idx]
+                lt_i = lambda_t[i_cell]
+                lt_j = lambda_t[j_cell]
+                lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
+
+                T_total = tv[idx] * lt_face
+
+                rows.append(i_cell)
+                cols.append(j_cell)
+                data.append(-T_total)
+                diag[i_cell] += T_total
+
+        rows.extend(range(n))
+        cols.extend(range(n))
+        data.extend(diag.tolist())
+
+        A = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
+
+        A_lil = A.tolil()
+        well_manager.apply_well_terms(A_lil, b, pressure, dt)
+        A_csr = A_lil.tocsr()
+
+        return A_csr, b
     
     def __repr__(self):
         return f"FVMDiscretizer({self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz})"

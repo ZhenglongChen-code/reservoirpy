@@ -89,3 +89,4 @@ nav:
   - 示例:
     - examples/index.md
     - 单相流模拟: examples/single-phase.md
+    - 两相流水驱模拟: examples/two-phase-waterflood.md

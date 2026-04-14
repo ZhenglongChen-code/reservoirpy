@@ -21,7 +21,19 @@ class TwoPhaseIMPES(BaseModel):
     """
     两相流IMPES模型
 
-    实现隐式压力-显式饱和度方法求解两相流问题
+    实现隐式压力-显式饱和度方法:
+    1. 隐式求解压力方程（总流度形式）
+    2. 显式更新水相饱和度（分流方程+上游权重）
+
+    Attributes:
+        discretizer: FVM离散化器
+        solver: 线性求解器
+        initial_saturation: 初始水相饱和度
+
+    Example:
+        >>> model = TwoPhaseIMPES(mesh, physics, config)
+        >>> state = model.initialize_state({'initial_pressure': 30e6, 'initial_saturation': 0.2})
+        >>> new_state = model.solve_timestep(dt, state, well_manager)
     """
 
     def __init__(self, mesh, physics, config: Dict[str, Any]):
@@ -29,9 +41,12 @@ class TwoPhaseIMPES(BaseModel):
 
         self.discretizer = FVMDiscretizer(mesh, physics)
         solver_config = config.get('linear_solver', {})
+        if 'method' not in solver_config:
+            solver_config['method'] = 'direct'
         self.solver = LinearSolver(solver_config)
 
         self.initial_saturation = config.get('initial_saturation', 0.2)
+        self.cfl_factor = config.get('cfl_factor', 0.8)
 
         logger.info(f"Initialized TwoPhaseIMPES: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz}")
 
@@ -50,7 +65,8 @@ class TwoPhaseIMPES(BaseModel):
     def assemble_system(self, dt: float, state_vars: Dict[str, np.ndarray],
                        well_manager) -> Tuple[csr_matrix, np.ndarray]:
         pressure = state_vars['pressure']
-        A, b = self.discretizer.discretize_single_phase(dt, pressure, well_manager)
+        saturation = state_vars['saturation']
+        A, b = self.discretizer.discretize_two_phase(dt, pressure, saturation, well_manager)
         return A, b
 
     def solve_timestep(self, dt: float, state_vars: Dict[str, np.ndarray],
@@ -70,36 +86,143 @@ class TwoPhaseIMPES(BaseModel):
                                   pressure_new: np.ndarray,
                                   saturation_old: np.ndarray,
                                   dt: float, well_manager) -> np.ndarray:
-        saturation_new = saturation_old.copy()
+        n = self.mesh.n_cells
+        physics = self.physics
+        mesh = self.mesh
 
-        for i in range(self.mesh.n_cells):
-            dS_dt = self._compute_saturation_rate(
-                pressure_old[i], pressure_new[i],
-                saturation_old[i])
+        porosity = np.array([
+            physics.property_manager.get_cell_property(i, 'porosity')
+            for i in range(n)
+        ])
+        volumes = np.array([float(mesh.cell_list[i].volume) for i in range(n)])
 
-            saturation_new[i] = saturation_old[i] + dS_dt * dt
-            saturation_new[i] = np.clip(saturation_new[i], 0.0, 1.0)
+        Sw = saturation_old
+        krw = np.array([physics.get_relative_permeability(s, 'water') for s in Sw])
+        kro = np.array([physics.get_relative_permeability(s, 'oil') for s in Sw])
+        lambda_w = krw / physics.mu_w
+        lambda_o = kro / physics.mu_o
+        lambda_t = lambda_w + lambda_o
+
+        dSw = np.zeros(n)
+
+        for direction in range(6):
+            trans = self.discretizer.trans_matrix[direction]
+            mask = trans != 0.0
+            if not np.any(mask):
+                continue
+
+            cell_indices = np.where(mask)[0]
+            j_cells = np.array([mesh.cell_list[i].neighbors[direction] for i in cell_indices])
+            valid = j_cells >= 0
+            ci = cell_indices[valid]
+            cj = j_cells[valid]
+
+            if len(ci) == 0:
+                continue
+
+            lt_i = lambda_t[ci]
+            lt_j = lambda_t[cj]
+            lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
+
+            dp = pressure_new[cj] - pressure_new[ci]
+
+            upstream_j = dp >= 0
+            f_w_up = np.where(upstream_j,
+                              lambda_w[cj] / (lt_j + 1e-30),
+                              lambda_w[ci] / (lt_i + 1e-30))
+
+            T_w = trans[ci] * lt_face * f_w_up
+            flux = T_w * dp
+
+            np.add.at(dSw, ci, flux)
+
+        for well in well_manager.wells:
+            z, y, x = well.location
+            cell_index = mesh.get_cell_index(z, y, x)
+            Sw_cell = saturation_old[cell_index]
+
+            if well.control_type == 'bhp':
+                q_total = well.compute_well_term(pressure_new[cell_index])
+            else:
+                q_total = well.value
+
+            if q_total < 0:
+                dSw[cell_index] += abs(q_total)
+            else:
+                lambda_w_cell = physics.get_relative_permeability(Sw_cell, 'water') / physics.mu_w
+                lambda_o_cell = physics.get_relative_permeability(Sw_cell, 'oil') / physics.mu_o
+                lambda_t_cell = lambda_w_cell + lambda_o_cell
+                f_w = lambda_w_cell / (lambda_t_cell + 1e-30)
+                dSw[cell_index] += f_w * q_total
+
+        saturation_new = saturation_old + dt * dSw / (volumes * porosity + 1e-30)
+        saturation_new = np.clip(saturation_new, 0.0, 1.0)
 
         return saturation_new
 
-    def _compute_saturation_rate(self, pressure_old: float,
-                               pressure_new: float, saturation: float) -> float:
-        dp = pressure_new - pressure_old
+    def compute_cfl_timestep(self, pressure: np.ndarray,
+                            saturation: np.ndarray,
+                            well_manager) -> float:
+        n = self.mesh.n_cells
+        physics = self.physics
+        mesh = self.mesh
 
-        kro = self.physics.get_relative_permeability(saturation, 'oil')
-        krw = self.physics.get_relative_permeability(saturation, 'water')
+        porosity = np.array([
+            physics.property_manager.get_cell_property(i, 'porosity')
+            for i in range(n)
+        ])
+        volumes = np.array([float(mesh.cell_list[i].volume) for i in range(n)])
 
-        lambda_o = kro / self.physics.mu_o
-        lambda_w = krw / self.physics.mu_w
-        lambda_t = lambda_o + lambda_w
+        Sw = saturation
+        krw = np.array([physics.get_relative_permeability(s, 'water') for s in Sw])
+        kro = np.array([physics.get_relative_permeability(s, 'oil') for s in Sw])
+        lambda_w = krw / physics.mu_w
+        lambda_o = kro / physics.mu_o
+        lambda_t = lambda_w + lambda_o
 
-        if lambda_t > 0:
-            porosity = self.physics.property_manager.get_cell_property(0, 'porosity')
-            dS_dt = 0.01 * dp / (lambda_t * porosity)
-        else:
-            dS_dt = 0.0
+        dt_min = np.inf
 
-        return dS_dt
+        for direction in range(6):
+            trans = self.discretizer.trans_matrix[direction]
+            mask = trans != 0.0
+            if not np.any(mask):
+                continue
+
+            cell_indices = np.where(mask)[0]
+            j_cells = np.array([mesh.cell_list[i].neighbors[direction] for i in cell_indices])
+            valid = j_cells >= 0
+            ci = cell_indices[valid]
+            cj = j_cells[valid]
+
+            if len(ci) == 0:
+                continue
+
+            lt_i = lambda_t[ci]
+            lt_j = lambda_t[cj]
+            lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
+
+            dp = np.abs(pressure[cj] - pressure[ci])
+            v_total = trans[ci] * lt_face * dp
+
+            dSw_fd = 0.01
+            Sw_i = Sw[ci]
+            krw_p = np.array([physics.get_relative_permeability(s + dSw_fd, 'water') for s in Sw_i])
+            kro_p = np.array([physics.get_relative_permeability(s + dSw_fd, 'oil') for s in Sw_i])
+            fw_p = (krw_p / physics.mu_w) / (krw_p / physics.mu_w + kro_p / physics.mu_o + 1e-30)
+
+            krw_m = np.array([physics.get_relative_permeability(s - dSw_fd, 'water') for s in Sw_i])
+            kro_m = np.array([physics.get_relative_permeability(s - dSw_fd, 'oil') for s in Sw_i])
+            fw_m = (krw_m / physics.mu_w) / (krw_m / physics.mu_w + kro_m / physics.mu_o + 1e-30)
+
+            dfw_dSw = (fw_p - fw_m) / (2 * dSw_fd)
+
+            active = v_total * np.abs(dfw_dSw) > 1e-30
+            if np.any(active):
+                dt_cells = porosity[ci[active]] * volumes[ci[active]] / (
+                    v_total[active] * np.abs(dfw_dSw[active]))
+                dt_min = min(dt_min, dt_cells.min())
+
+        return dt_min * self.cfl_factor if dt_min < np.inf else np.inf
 
     def update_properties(self, state_vars: Dict[str, np.ndarray]) -> None:
         pressure = state_vars['pressure']
@@ -128,8 +251,7 @@ class TwoPhaseIMPES(BaseModel):
 
         if np.any(saturation < 0) or np.any(saturation > 1):
             logger.warning("Warning: Saturation out of [0, 1] range")
-            saturation = np.clip(saturation, 0.0, 1.0)
-            state_vars['saturation'] = saturation
+            state_vars['saturation'] = np.clip(saturation, 0.0, 1.0)
 
         return True
 
@@ -140,6 +262,7 @@ class TwoPhaseIMPES(BaseModel):
             'equations': ['pressure', 'saturation'],
             'discretization': 'FVM',
             'time_integration': 'implicit_pressure_explicit_saturation',
+            'cfl_factor': self.cfl_factor,
             'linear_solver': self.solver.get_info() if hasattr(self.solver, 'get_info') else 'unknown'
         })
         return info

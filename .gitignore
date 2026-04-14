@@ -33,3 +33,7 @@ results/
 *.vtk
 *.png
 !docs/**/*.png
+
+# Secrets
+.env
+.secrets.yaml

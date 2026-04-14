@@ -15,6 +15,11 @@ physics:
 
   permeability: 100
   
+  # 垂直/水平渗透率比 (kz/kx)
+  # 沉积岩中通常 kz << kx，典型值 0.01~0.1
+  # 2D 模拟 (nz=1) 时此参数无影响
+  kz_kx_ratio: 0.1
+  
   # 孔隙度
 
   porosity: 0.2

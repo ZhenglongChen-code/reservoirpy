@@ -1,424 +1,273 @@
-# 油藏数值模拟器 (Reservoir Simulator)
+# ReservoirPy
 
-一个轻量级、模块化、可扩展的油藏数值模拟器软件包，支持单相流和两相流渗流方程求解。
+轻量级、模块化、可扩展的油藏数值模拟器，支持单相流和两相流（IMPES）渗流方程求解。
 
 ## 🚀 主要特性
 
-- **模块化设计**: 清晰的模块边界，易于维护和扩展
-- **配置驱动**: YAML配置文件管理，支持不同模拟场景
-- **功能完整**: 支持2D/3D单相流和两相流模拟
-- **用户友好**: 简洁的API接口，丰富的可视化功能
-- **工业标准**: 符合实际工程应用需求
+- **模块化架构**: BaseModel 抽象接口 + ModelFactory 工厂模式，易于扩展新模型
+- **配置驱动**: YAML / 字典配置，灵活管理不同模拟场景
+- **单相流模拟**: 隐式压力求解，支持多种线性求解器（Direct/CG/BiCGSTAB/GMRES）
+- **两相流 IMPES**: 隐式压力-显式饱和度方法，支持 CFL 自适应时间步
+- **Peaceman 井模型**: 定压/定流量控制方式
+- **2D/3D 可视化**: matplotlib + PyVista
+- **地质统计**: 变差函数建模 + 克里金插值 + SGSIM 渗透率场生成
+- **完整文档**: MkDocs + mkdocstrings 自动生成 API 文档
 
 ## 📦 安装
 
-### 从源码安装
+### 使用 UV（推荐）
 
 ```bash
-git clone https://github.com/yourusername/reservoir-sim.git
-cd reservoir-sim
-pip install -e .
+git clone https://github.com/yourusername/reservoirpy.git
+cd reservoirpy
+uv sync --extra dev --extra viz --extra geostat
 ```
 
-### 开发模式安装
+### 使用 pip
 
 ```bash
-pip install -e .[dev,viz]
+pip install -e ".[dev,viz]"
 ```
 
 ## 🏗️ 项目结构
 
 ```
 reservoirpy/
-├── src/
-│   └── reservoirpy/            # 油藏模拟器源代码
-│       ├── __init__.py         # 包初始化
-│       ├── core/               # 核心模块
-│       │   ├── __init__.py
-│       │   ├── discretization.py       # FVM离散化
-│       │   ├── linear_solver.py        # 线性求解器
-│       │   ├── nonlinear_solver.py     # 非线性求解器（两相流）
-│       │   ├── simulator.py            # 主模拟器
-│       │   ├── time_integration.py     # 时间积分
-│       │   └── well_model.py           # 井模型
-│       ├── mesh/                       # 网格模块
-│       │   ├── __init__.py
-│       │   └── mesh.py                 # 网格管理
-│       ├── models/                     # 求解器模型
-│       │   ├── __init__.py
-│       │   ├── single_phase.py         # 单相流求解器
-│       │   ├── two_phase_impes.py      # 两相流IMPES求解器
-│       │   └── two_phase_fim.py        # 两相流FIM求解器
-│       ├── physics/                    # 物理模型
-│       │   ├── __init__.py
-│       │   └── physics.py              # 物理属性模型
-│       ├── utils/                      # 工具函数
-│       │   ├── __init__.py
-│       │   ├── io.py                   # 输入输出
-│       │   ├── units.py                # 单位转换
-│       │   └── validation.py           # 数据验证
-│       ├── visualization/              # 可视化模块
-│       │   ├── __init__.py
-│       │   ├── plot_2d.py              # 2D可视化
-│       │   ├── plot_3d.py              # 3D可视化
-│       │   └── animation.py            # 动画生成
-│       └── main.py             # 主入口
-├── config/                     # 配置文件
-│   ├── default_config.yaml     # 默认配置
-│   └── examples/               # 示例配置
-├── docs/                       # 文档
-│   ├── api/                    # API文档
-│   ├── tutorials/              # 教程
-│   └── theory/                 # 理论文档
-├── examples/                   # 示例脚本
-│   ├── basical.py
-│   └── simple_example.py
-├── tests/                      # 测试
-│   ├── __init__.py
-│   ├── test_mesh.py
-│   ├── test_physics.py
-│   ├── test_solvers.py
-│   └── test_visualization.py
-├── main.py                     # 程序入口
-├── setup.py                    # 安装脚本
-└── README.md                   # 说明文档
+├── src/reservoirpy/           # 源代码（src layout）
+│   ├── core/                  # 核心模块
+│   │   ├── discretization.py  # FVM 离散化（单相/两相）
+│   │   ├── linear_solver.py   # 线性求解器
+│   │   ├── nonlinear_solver.py# 非线性求解器
+│   │   ├── simulator.py       # 主模拟器
+│   │   ├── time_integration.py# 时间积分
+│   │   ├── well_model.py      # Peaceman 井模型
+│   │   └── output_manager.py  # 输出管理
+│   ├── mesh/                  # 结构化网格
+│   │   └── mesh.py
+│   ├── models/                # 数学模型
+│   │   ├── base_model.py      # 抽象基类
+│   │   ├── model_factory.py   # 工厂模式
+│   │   ├── single_phase.py    # 单相流模型
+│   │   ├── two_phase_impes.py # 两相流 IMPES 模型
+│   │   └── two_phase_fim.py   # 两相流 FIM 模型（框架）
+│   ├── physics/               # 物理属性
+│   │   └── physics.py         # Corey 相渗 + 两相物性
+│   ├── geostatistics/         # 地质统计
+│   │   ├── variogram.py       # 变差函数建模
+│   │   ├── kriging.py         # 克里金插值
+│   │   ├── sgsim.py           # 序贯高斯模拟
+│   │   └── perm_generator.py  # 渗透率场生成器
+│   ├── utils/                 # 工具函数
+│   └── visualization/         # 可视化
+├── config/                    # 配置文件
+├── docs/                      # MkDocs 文档
+├── examples/                  # 示例脚本
+├── tests/                     # 测试套件（pytest）
+└── pyproject.toml             # 项目配置（hatchling）
 ```
 
-## 🧩 核心模块详解
+## 🧮 数学模型
 
-### 1. 网格模块 (`mesh/mesh.py`)
+### 单相流模型
 
-提供结构化矩形网格（2D/3D）的拓扑与几何信息，支持后续FVM离散。
+求解单相渗流方程：`φ·c·∂p/∂t = ∇·(k/μ·∇p) + q`
 
-主要类:
-- `StructuredMesh`: 结构化网格管理类
-- `CubeCell`: 网格单元类
-- `Node`: 网格节点类
+- 隐式时间积分，无条件稳定
+- 支持多种线性求解器 + 预条件
+- **渗透率各向异性**：kx = ky ≠ kz（`kz_kx_ratio` 参数控制，默认 0.1）
 
-### 2. 物理属性模块 (`physics/physics.py`)
+### 两相流 IMPES 模型
 
-封装单相流和两相流动物理参数，为FVM提供物性输入。
+隐式压力-显式饱和度方法：
 
-主要类:
-- `SinglePhaseProperties`: 单相流物理属性
-- `TwoPhaseProperties`: 两相流物理属性（继承自单相流）
+1. **隐式求解压力方程**（总流度形式）：`φ·c_t·∂p/∂t = ∇·(λ_t·k·∇p) + q_t`
+2. **显式更新饱和度**（分流方程 + 上游权重）：`φ·∂S_w/∂t + ∇·(f_w·v_t) = q_w`
 
-### 3. 离散化模块 (`core/discretization.py`)
-
-实现有限体积法离散化，组装线性系统。
-
-主要类:
-- `FVMDiscretizer`: 有限体积法离散化器
-
-### 4. 时间积分模块 (`core/time_integration.py`)
-
-实现隐式欧拉等时间积分方法。
-
-主要类:
-- `ImplicitEulerIntegrator`: 隐式欧拉积分器
-
-### 5. 线性求解器模块 (`core/linear_solver.py`)
-
-提供多种线性求解器方法。
-
-主要类:
-- `LinearSolver`: 线性求解器
-
-### 6. 非线性求解器模块 (`core/nonlinear_solver.py`)
-
-实现牛顿-拉夫森方法等非线性求解器。
-
-主要类:
-- `NewtonRaphsonSolver`: 牛顿-拉夫森求解器
-
-### 7. 井模型模块 (`core/well_model.py`)
-
-实现Peaceman井模型，支持定产量和定井底流压两种控制方式。
-
-主要类:
-- `Well`: 井模型类
-- `WellManager`: 井管理器类
-
-### 8. 主模拟器 (`core/simulator.py`)
-
-协调所有模块，提供用户友好的运行接口。
-
-主要类:
-- `ReservoirSimulator`: 油藏数值模拟器主类
-
-## 🧮 数学模型架构 (新版)
-
-### 设计理念
-
-采用**策略模式 + 工厂模式**的架构设计，实现了清晰的模块分离和高度的可扩展性：
-
-- **BaseModel**: 定义所有数学模型的统一接口
-- **ModelFactory**: 负责根据配置创建具体模型实例  
-- **ReservoirSimulator**: 作为Context，委托具体的数学计算给Model对象
-
-### 架构优势
-
-1. **职责分离**: 模拟器专注于流程控制，模型专注于数学计算
-2. **易于扩展**: 添加新模型只需继承BaseModel并注册到工厂
-3. **一致性**: 所有模型遵循相同的接口规范
-4. **可测试性**: 模型独立且接口明确，便于单元测试
-
-### 模型层次结构
-
-```mermaid
-graph TB
-    A[ReservoirSimulator] --> B[ModelFactory]
-    B --> C[BaseModel]
-    C --> D[SinglePhaseModel]
-    C --> E[IMPESModel] 
-    C --> F[FIMModel]
-    C --> G[ThermicalModel 扩展]
-    
-    D --> H[FVMDiscretizer]
-    E --> H
-    F --> H
-    G --> H
-    
-    D --> I[LinearSolver]
-    E --> I
-    F --> J[NonlinearSolver]
-    G --> J
-```
-
-### 1. 单相流模型 (SinglePhaseModel)
-
-实现单相流渗流方程：`φ·c·∂p/∂t = ∇·(k/μ·∇p) + q`
-
-**特点**：
-- 只需求解压力方程
-- 使用隐式时间积分
-- 支持线性求解器
-
-**适用场景**：
-- 单一流体相态
-- 压力衰竭开发
-- 注水保压
-
-### 2. 两相流IMPES模型 (IMPESModel)
-
-实现隐式压力-显式饱和度方法：
-- 第一步：隐式求解压力方程
-- 第二步：显式更新饱和度方程
-
-**特点**：
-- 计算效率高
-- 时间步长受CFL条件限制
-- 适用于温和驱替过程
-
-**适用场景**：
-- 水驱油
-- 气驱油（低压缩性）
-- 饱和度变化较缓慢的情况
-
-### 3. 两相流FIM模型 (FIMModel)
-
-实现全隐式方法：
-- 同时隐式求解压力和饱和度耦合系统
-- 使用Newton-Raphson非线性求解器
-
-**特点**：
-- 无条件稳定
-- 时间步长可以较大
-- 计算成本较高
-
-**适用场景**：
-- 强烈耦合的多相流动
-- 饱和度变化剧烈
-- 高压缩性流体
-
-## 🧮 求解器模块 (兼容旧版)
-
-### 1. 单相流求解器 (`models/single_phase.py`)
-
-实现单相流油藏模拟的完整求解流程。
-
-主要类:
-- `SinglePhaseSolver`: 单相流求解器
-
-### 2. 两相流IMPES求解器 (`models/two_phase_impes.py`)
-
-实现隐式压力-显式饱和度方法求解两相流问题。
-
-主要类:
-- `TwoPhaseIMPES`: IMPES求解器
-
-### 3. 两相流FIM求解器 (`models/two_phase_fim.py`)
-
-实现全隐式方法求解两相流问题。
-
-主要类:
-- `TwoPhaseFIM`: FIM求解器
-
-## 📊 可视化模块
-
-### 1. 2D可视化 (`visualization/plot_2d.py`)
-
-提供2D压力场、饱和度场等的可视化功能。
-
-主要类:
-- `Plot2D`: 2D可视化器
-
-### 2. 3D可视化 (`visualization/plot_3d.py`)
-
-提供3D压力场、饱和度场等的可视化功能。
-
-主要类:
-- `Plot3D`: 3D可视化器
-
-### 3. 动画生成 (`visualization/animation.py`)
-
-提供模拟结果的动画生成功能。
-
-主要类:
-- `AnimationGenerator`: 动画生成器
-
-## 🛠️ 工具模块
-
-### 1. 输入输出 (`utils/io.py`)
-
-提供配置文件读写、数据导入导出等功能。
-
-### 2. 单位转换 (`utils/units.py`)
-
-提供常用的油藏工程单位转换功能。
-
-主要类:
-- `UnitConverter`: 单位转换器
-
-### 3. 数据验证 (`utils/validation.py`)
-
-提供输入数据验证和结果验证功能。
-
-主要类:
-- `ConfigValidator`: 配置验证器
+关键特性：
+- 界面总流度采用调和平均
+- 分流函数使用上游权重（upstream weighting）
+- 注入井注入纯水（f_w=1.0），生产井按分流函数产出
+- 支持 CFL 自适应时间步长
+- **渗透率各向异性**：3D 模拟中 z 方向使用 kz = kx × kz_kx_ratio
 
 ## 🚀 快速开始
 
-### 基本使用
+### 单相流模拟
 
-```
+```python
 from reservoirpy import ReservoirSimulator
 
-# 使用配置文件创建模拟器
-simulator = ReservoirSimulator('config/default_config.yaml')
-
-# 运行模拟
-results = simulator.run_simulation()
-
-# 获取结果
-pressure_field = simulator.get_pressure_field()
-```
-
-### 程序化配置
-
-```
-from reservoirpy import ReservoirSimulator
-
-# 使用字典配置
 config = {
-    'mesh': {
-        'nx': 20, 'ny': 20, 'nz': 1,
-        'dx': 10.0, 'dy': 10.0, 'dz': 5.0
-    },
+    'mesh': {'nx': 10, 'ny': 10, 'nz': 1, 'dx': 10, 'dy': 10, 'dz': 10},
     'physics': {
-        'permeability': 100.0,
+        'type': 'single_phase',
+        'permeability': 100.0,   # mD
         'porosity': 0.2,
-        'viscosity': 0.001,
-        'compressibility': 1e-9
+        'viscosity': 0.001,      # Pa·s
+        'compressibility': 1e-9  # 1/Pa
     },
     'wells': [
-        {'location': [0, 5, 5], 'control_type': 'rate', 'value': 0.001},
-        {'location': [0, 15, 15], 'control_type': 'bhp', 'value': 1e6}
+        {'location': [0, 5, 5], 'control_type': 'bhp',
+         'value': 1e6, 'rw': 0.05, 'skin_factor': 0}
     ],
     'simulation': {
-        'dt': 86400,
-        'total_time': 31536000,
+        'dt': 86400, 'total_time': 864000,
         'initial_pressure': 30e6
     }
 }
 
-simulator = ReservoirSimulator(config_dict=config)
-results = simulator.run_simulation()
+sim = ReservoirSimulator(config_dict=config)
+results = sim.run_simulation()
 ```
 
-### 网格和物理属性
+### 两相流水驱模拟
 
+```python
+from reservoirpy import ReservoirSimulator
+
+config = {
+    'mesh': {'nx': 5, 'ny': 5, 'nz': 1, 'dx': 10, 'dy': 10, 'dz': 10},
+    'physics': {
+        'type': 'two_phase_impes',
+        'permeability': 100.0,
+        'porosity': 0.2,
+        'compressibility': 1e-9,
+        'oil_viscosity': 5e-3,     # Pa·s
+        'water_viscosity': 1e-3    # Pa·s
+    },
+    'wells': [
+        {'location': [0, 0, 0], 'control_type': 'bhp',
+         'value': 35e6, 'rw': 0.05, 'skin_factor': 0},  # 注入井
+        {'location': [0, 4, 4], 'control_type': 'bhp',
+         'value': 25e6, 'rw': 0.05, 'skin_factor': 0}   # 生产井
+    ],
+    'simulation': {
+        'dt': 86400, 'total_time': 864000,
+        'initial_pressure': 30e6,
+        'initial_saturation': 0.2
+    }
+}
+
+sim = ReservoirSimulator(config_dict=config)
+results = sim.run_simulation()
 ```
+
+### CFL 自适应时间步
+
+IMPES 显式饱和度更新受 CFL 条件限制，可使用自适应时间步：
+
+```python
+from reservoirpy.models.two_phase_impes import TwoPhaseIMPES
 from reservoirpy.mesh.mesh import StructuredMesh
-from reservoirpy.physics.physics import SinglePhaseProperties
+from reservoirpy.physics.physics import TwoPhaseProperties
+from reservoirpy.core.well_model import WellManager
+import numpy as np
 
-# 创建网格
-mesh = StructuredMesh(nx=20, ny=20, nz=1, dx=10.0, dy=10.0, dz=5.0)
-
-# 创建物理属性
-physics = SinglePhaseProperties(mesh, {
-    'permeability': 100.0,  # mD
-    'porosity': 0.2,
-    'viscosity': 0.001,     # Pa·s
-    'compressibility': 1e-9  # 1/Pa
+mesh = StructuredMesh(nx=10, ny=10, nz=1, dx=10, dy=10, dz=10)
+physics = TwoPhaseProperties(mesh, {
+    'permeability': 100.0, 'porosity': 0.2,
+    'compressibility': 1e-9,
+    'oil_viscosity': 5e-3, 'water_viscosity': 1e-3
 })
+
+well_manager = WellManager(mesh, wells_config)
+well_manager.initialize_wells(k, physics.viscosity)
+
+model = TwoPhaseIMPES(mesh, physics, {'cfl_factor': 0.8})
+state = model.initialize_state({
+    'initial_pressure': 30e6,
+    'initial_saturation': 0.2
+})
+
+dt_max = 86400.0
+total_time = 864000.0
+current_time = 0.0
+
+while current_time < total_time:
+    cfl_dt = model.compute_cfl_timestep(
+        state['pressure'], state['saturation'], well_manager)
+    actual_dt = min(dt_max, cfl_dt, total_time - current_time)
+    state = model.solve_timestep(actual_dt, state, well_manager)
+    model.update_properties(state)
+    current_time += actual_dt
 ```
 
-## 📊 示例
+### 地质统计 — 渗透率场生成
 
-运行示例脚本：
+```python
+from reservoirpy.geostatistics import PermeabilityGenerator
 
+gen = PermeabilityGenerator(nx=20, ny=20, dx=10, dy=10)
+
+# 非条件模拟
+perm_field = gen.generate(
+    major_range=50, minor_range=30,     # 变差函数变程 (m)
+    sill=1.0, vtype='exponential',      # 变差函数模型
+    n_realizations=1, seed=42,
+    mean_log_perm=2.0,                  # log10(K) 均值 → ~100 mD
+    std_log_perm=0.5,                   # log10(K) 标准差
+)
+# perm_field.shape = (1, 20, 20)，单位 mD
+
+# 条件模拟（带井位硬数据）
+import numpy as np
+hard_data = np.array([
+    [5.0, 5.0, 100.0],    # (x, y, perm_mD)
+    [195.0, 195.0, 50.0],
+])
+perm_field = gen.generate(
+    hard_data=hard_data,
+    major_range=50, minor_range=30,
+    sill=1.0, vtype='exponential',
+    n_realizations=5, seed=42,
+)
+
+# 直接传入模拟器
+config = {
+    'physics': {
+        'type': 'two_phase_impes',
+        'permeability': perm_field,  # 直接使用生成的渗透率场
+        ...
+    }
+}
 ```
-python examples/basical.py
-```
-
-这将创建一个网格并展示基本的可视化功能。
-
-## 🔧 配置
-
-配置文件使用YAML格式，主要包含以下部分：
-
-- **mesh**: 网格配置
-- **physics**: 物理属性
-- **wells**: 井配置
-- **simulation**: 模拟参数
-- **linear_solver**: 线性求解器配置
-- **visualization**: 可视化配置
-
-详细配置说明请参考 `config/default_config.yaml`。
 
 ## 🧪 测试
 
-运行测试：
+```bash
+# 运行全部测试
+uv run pytest tests/ -v
 
+# 运行两相流测试
+uv run pytest tests/test_two_phase.py -v
 ```
-pytest tests/
-```
+
+当前测试覆盖：网格、物理属性、井模型、线性求解器、单相流模型、两相流 IMPES、模拟器集成。
 
 ## 📚 文档
 
-- [API文档](docs/api/)
-- [教程](docs/tutorials/)
-- [理论背景](docs/theory/)
+```bash
+# 本地启动文档服务
+uv run mkdocs serve
+
+# 部署到 GitHub Pages
+uv run mkdocs gh-deploy --force
+```
+
+文档包含：
+- **理论基础**: 有限体积法、单相流方程、两相流方程、IMPES 方法、井模型
+- **求解全流程**: 从 PDE 到离散到求解的完整推导
+- **API 参考**: 自动从 docstrings 生成
+- **示例**: 单相流模拟、两相流水驱模拟
 
 ## 🤝 贡献
 
-欢迎贡献代码！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。
+欢迎贡献代码！请确保：
+
+1. 新功能附带测试
+2. 通过 `uv run pytest tests/ -v` 验证
+3. 遵循现有代码风格
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
-
-## 🙏 致谢
-
-感谢所有为这个项目做出贡献的开发者和研究人员。
-
-## 📞 联系方式
-
-- 项目主页: https://github.com/yourusername/reservoir-sim
-- 问题反馈: https://github.com/yourusername/reservoir-sim/issues
-- 邮箱: reservoir@example.com
-
----
-
-*基于重构后的模块化架构，提供了更清晰的代码组织结构和更好的可扩展性。*
+MIT License

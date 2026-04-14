@@ -48,6 +48,8 @@ class SinglePhaseModel(BaseModel):
         
         # 初始化线性求解器
         solver_config = config.get('linear_solver', {})
+        if 'method' not in solver_config:
+            solver_config['method'] = 'direct'
         self.solver = LinearSolver(solver_config)
         
         logger.info(f"Initialized SinglePhaseModel: {self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz}")
