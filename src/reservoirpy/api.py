@@ -85,7 +85,7 @@ def _upload_to_oss(data: bytes, object_key: str) -> Optional[str]:
         bucket = oss2.Bucket(auth, OSS_CONFIG['endpoint'], OSS_CONFIG['bucket_name'])
         full_key = OSS_CONFIG['prefix'] + object_key
         bucket.put_object(full_key, data)
-        signed_url = bucket.sign_url('GET', full_key, 3600)
+        signed_url = bucket.sign_url('GET', full_key, 3600, slash_safe=True)
         logger.info(f"Uploaded to OSS: {full_key}")
         return signed_url
     except Exception as e:
