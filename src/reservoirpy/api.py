@@ -104,6 +104,12 @@ def _save_result_to_oss(result: Dict, prefix: str) -> Dict:
         arrays['saturation'] = np.array(result['saturation'], dtype=np.float32)
     if 'permeability_mD' in result:
         arrays['permeability_mD'] = np.array(result['permeability_mD'], dtype=np.float32)
+    if 'well_mask' in result:
+        arrays['well_mask'] = np.array(result['well_mask'], dtype=np.int8)
+    if 'well_bhp_MPa' in result:
+        arrays['well_bhp_MPa'] = np.array(result['well_bhp_MPa'], dtype=np.float32)
+    if 'time_days' in result:
+        arrays['time_days'] = np.array(result['time_days'], dtype=np.float32)
 
     buf = io.BytesIO()
     np.savez_compressed(buf, **arrays)
@@ -337,11 +343,20 @@ def _run_single_phase(req: SinglePhaseRequest) -> Dict:
     while len(results) < len(snap_times):
         results.append(results[-1])
 
+    well_mask = np.zeros((ny, nx), dtype=np.int8)
+    well_bhp = np.zeros((ny, nx), dtype=np.float32)
+    for w in req.wells:
+        well_mask[w.y, w.x] = 1 if w.is_injector else 2
+        well_bhp[w.y, w.x] = w.bhp_MPa
+
     p_all = np.stack(results)
     return {
         'pressure_MPa': (p_all / 1e6),
+        'time_days': (time_fracs * req.total_time_days).astype(np.float32),
         'time_fractions': time_fracs.tolist(),
         'permeability_mD': perm,
+        'well_mask': well_mask,
+        'well_bhp_MPa': well_bhp,
         'grid': {'nx': nx, 'ny': ny, 'dx': req.dx, 'dy': req.dy},
     }
 
@@ -418,11 +433,20 @@ def _run_two_phase(req: TwoPhaseRequest) -> Dict:
         p_results.append(p_results[-1])
         sw_results.append(sw_results[-1])
 
+    well_mask = np.zeros((ny, nx), dtype=np.int8)
+    well_bhp = np.zeros((ny, nx), dtype=np.float32)
+    for w in req.wells:
+        well_mask[w.y, w.x] = 1 if w.is_injector else 2
+        well_bhp[w.y, w.x] = w.bhp_MPa
+
     return {
         'pressure_MPa': np.stack(p_results) / 1e6,
         'saturation': np.stack(sw_results),
+        'time_days': (time_fracs * req.total_time_days).astype(np.float32),
         'time_fractions': time_fracs.tolist(),
         'permeability_mD': perm,
+        'well_mask': well_mask,
+        'well_bhp_MPa': well_bhp,
         'grid': {'nx': nx, 'ny': ny, 'dx': req.dx, 'dy': req.dy},
     }
 
