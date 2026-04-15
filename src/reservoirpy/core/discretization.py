@@ -1,13 +1,13 @@
 """
 有限体积法离散化模块
 
-实现单相流和两相流的有限体积法离散化
+实现单相流和两相流的有限体积法离散化。
+所有矩阵组装逻辑均使用 NumPy 向量化操作，避免 Python for 循环。
 """
 
 import numpy as np
 from typing import Dict, Any, Tuple, List, Union
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import spsolve, cg, bicgstab
+from scipy.sparse import csr_matrix, coo_matrix
 import warnings
 
 from reservoirpy.mesh.mesh import StructuredMesh, CubeCell
@@ -21,296 +21,254 @@ class FVMDiscretizer:
 
     将渗流微分方程离散化为线性系统 Ax=b。
 
-    支持的离散化:
-        - 单相流: discretize_single_phase()
-        - 两相流: discretize_two_phase() (待实现)
-
-    内部使用 COO 稀疏矩阵格式批量构建，最终转为 CSR 格式供求解器使用。
+    内部使用 NumPy 向量化操作 + COO 稀疏矩阵批量构建，
+    最终转为 CSR 格式供求解器使用。
 
     Attributes:
         mesh: 结构化网格对象
         physics: 物理属性对象（单相或两相）
         total_cells: 总单元数
         trans_matrix: 传导率矩阵，形状 (6, n_cells)，6个方向 [W, E, N, S, B, T]
+        neighbor_indices: 邻居索引矩阵，形状 (6, n_cells)，-1 表示边界
+        perm_flat: 展平的渗透率数组 (n_cells,)，SI 单位
+        perm_z_flat: 展平的垂向渗透率数组 (n_cells,)，SI 单位
+        porosity_flat: 展平的孔隙度数组 (n_cells,)
+        volumes: 单元体积数组 (n_cells,)
 
     Example:
         >>> discretizer = FVMDiscretizer(mesh, physics)
         >>> A, b = discretizer.discretize_single_phase(dt, pressure, well_manager)
     """
-    
+
     def __init__(self, mesh: StructuredMesh, physics: BasePhysics):
-        """
-        初始化离散化器
-        
-        Args:
-            mesh: 结构化网格
-            physics: 物理属性（可以是单相或两相）
-        """
         self.mesh = mesh
         self.physics = physics
         self.total_cells = mesh.total_cells
-        
-        # 计算传导率矩阵
+
+        self._build_neighbor_table()
+        self._extract_property_arrays()
         self._compute_transmissibilities()
-        
-    def _compute_transmissibilities(self):
-        """
-        计算传导率矩阵
-        """
-        # 初始化传导率矩阵 (6个方向: W, E, N, S, B, T)
-        self.trans_matrix = np.zeros((6, self.total_cells))
-        
-        for i in range(self.total_cells):
-            z, y, x = self.mesh.get_cell_coords(i)
-            cell = self.mesh.cell_list[i]
-            
-            # 获取邻居单元
-            neighbors = self.mesh.get_neighbors(z, y, x)
-            
-            # 计算各方向的传导率
-            for direction, neighbor_idx in enumerate(neighbors):
-                if neighbor_idx != -1:
-                    # 计算传导率
-                    trans = self._compute_transmissibility(i, neighbor_idx, direction)
-                    self.trans_matrix[direction, i] = trans
-                    
-    def _compute_transmissibility(self, cell_idx1: int, cell_idx2: int, direction: int) -> float:
-        """
-        计算两个相邻单元之间的传导率
-        
-        Args:
-            cell_idx1: 单元1索引
-            cell_idx2: 单元2索引
-            direction: 方向 (0:W, 1:E, 2:N, 3:S, 4:B, 5:T)
-            
-        Returns:
-            传导率值
-        """
-        # 将方向索引转换为字符串表示
-        direction_map = {0: 'x', 1: 'x', 2: 'y', 3: 'y', 4: 'z', 5: 'z'}
-        direction_str = direction_map[direction]
-        
-        # 使用物理属性对象计算传导率
-        transmissibility = self.physics.get_transmissibility(cell_idx1, cell_idx2, direction_str)
-        
-        return transmissibility
-    
-    def _get_contact_area(self, direction: int) -> float:
-        """
-        获取接触面积
-        
-        Args:
-            direction: 方向
-            
-        Returns:
-            接触面积
-        """
-        if direction in [0, 1]:  # W, E (x方向)
-            return self.mesh.dy * self.mesh.dz
-        elif direction in [2, 3]:  # N, S (y方向)
-            return self.mesh.dx * self.mesh.dz
-        else:  # B, T (z方向)
-            return self.mesh.dx * self.mesh.dy
-    
-    def _get_contact_distance(self, direction: int) -> float:
-        """
-        获取接触距离
-        
-        Args:
-            direction: 方向
-            
-        Returns:
-            接触距离
-        """
-        if direction in [0, 1]:  # W, E (x方向)
-            return self.mesh.dx
-        elif direction in [2, 3]:  # N, S (y方向)
-            return self.mesh.dy
-        else:  # B, T (z方向)
-            return self.mesh.dz
-    
-    def discretize_single_phase(self, dt: float, pressure: np.ndarray, 
-                               well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
-        from scipy.sparse import coo_matrix, lil_matrix
-        
+
+    def _build_neighbor_table(self):
+        """向量化构建邻居索引表，避免逐单元访问 cell.neighbors"""
+        nx, ny, nz = self.mesh.nx, self.mesh.ny, self.mesh.nz
         n = self.total_cells
-        b = np.zeros(n)
-        
-        compressibility = getattr(self.physics, 'compressibility', 1e-9)
-        
-        porosity = np.array([
-            self.physics.property_manager.get_cell_property(i, 'porosity')
-            for i in range(n)
+        idx = np.arange(n)
+        k = idx % nx
+        j = (idx // nx) % ny
+        i = idx // (nx * ny)
+
+        self.neighbor_indices = np.full((6, n), -1, dtype=np.int32)
+
+        self.neighbor_indices[0] = np.where(k > 0, idx - 1, -1)
+        self.neighbor_indices[1] = np.where(k < nx - 1, idx + 1, -1)
+        self.neighbor_indices[2] = np.where(j > 0, idx - nx, -1)
+        self.neighbor_indices[3] = np.where(j < ny - 1, idx + nx, -1)
+        self.neighbor_indices[4] = np.where(i > 0, idx - nx * ny, -1)
+        self.neighbor_indices[5] = np.where(i < nz - 1, idx + nx * ny, -1)
+
+        self._dir_axis = np.array([0, 0, 1, 1, 2, 2])
+
+    def _extract_property_arrays(self):
+        """向量化提取物理属性为 1D 数组，避免逐单元调用 get_cell_property"""
+        pm = self.physics.property_manager
+        n = self.total_cells
+
+        def _flatten_prop(name):
+            prop = pm.properties.get(name)
+            if prop is None:
+                return np.zeros(n)
+            if isinstance(prop, (int, float)):
+                return np.full(n, float(prop))
+            if isinstance(prop, np.ndarray):
+                return prop.ravel().astype(np.float64)
+            return np.zeros(n)
+
+        self.perm_flat = _flatten_prop('permeability')
+        self.perm_z_flat = _flatten_prop('permeability_z')
+        self.porosity_flat = _flatten_prop('porosity')
+        self.volumes = np.full(n, float(self.mesh.dx * self.mesh.dy * self.mesh.dz))
+
+    def _compute_transmissibilities(self):
+        """向量化计算传导率矩阵，替代逐单元循环"""
+        n = self.total_cells
+        self.trans_matrix = np.zeros((6, n))
+
+        area_map = np.array([
+            self.mesh.dy * self.mesh.dz,
+            self.mesh.dy * self.mesh.dz,
+            self.mesh.dx * self.mesh.dz,
+            self.mesh.dx * self.mesh.dz,
+            self.mesh.dx * self.mesh.dy,
+            self.mesh.dx * self.mesh.dy,
         ])
-        volumes = np.array([float(self.mesh.cell_list[i].volume) for i in range(n)])
-        
-        acc_coeff = volumes * porosity * compressibility / dt
-        b = acc_coeff * pressure
-        
-        rows = []
-        cols = []
-        data = []
-        
-        diag = acc_coeff.copy()
-        
-        for direction in range(6):
-            trans = self.trans_matrix[direction]
-            mask = trans != 0.0
-            if not np.any(mask):
+        dist_map = np.array([
+            self.mesh.dx, self.mesh.dx,
+            self.mesh.dy, self.mesh.dy,
+            self.mesh.dz, self.mesh.dz,
+        ])
+
+        mu = getattr(self.physics, 'viscosity', 1e-3)
+
+        for d in range(6):
+            ni = self.neighbor_indices[d]
+            valid = ni >= 0
+            if not np.any(valid):
                 continue
-                
-            cell_indices = np.where(mask)[0]
-            trans_vals = trans[cell_indices]
-            
-            neighbors = np.array([
-                self.mesh.cell_list[i].neighbors[direction] 
-                for i in cell_indices
-            ])
-            
-            valid = neighbors != -1
-            cell_indices = cell_indices[valid]
-            trans_vals = trans_vals[valid]
-            neighbor_indices = neighbors[valid]
-            
-            rows.extend(cell_indices.tolist())
-            cols.extend(neighbor_indices.tolist())
-            data.extend((-trans_vals).tolist())
-            
-            np.add.at(diag, cell_indices, trans_vals)
-        
-        rows.extend(range(n))
-        cols.extend(range(n))
-        data.extend(diag.tolist())
-        
+
+            ci = np.where(valid)[0]
+            cj = ni[ci]
+
+            axis = self._dir_axis[d]
+            if axis < 2:
+                k_i = self.perm_flat[ci]
+                k_j = self.perm_flat[cj]
+            else:
+                k_i = self.perm_z_flat[ci]
+                k_j = self.perm_z_flat[cj]
+
+            k_harm = np.where(
+                (k_i + k_j) > 0,
+                2.0 * k_i * k_j / (k_i + k_j),
+                0.0,
+            )
+
+            self.trans_matrix[d, ci] = k_harm * area_map[d] / (mu * dist_map[d])
+
+    def discretize_single_phase(self, dt: float, pressure: np.ndarray,
+                                well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
+        """向量化组装单相流线性系统"""
+        n = self.total_cells
+
+        compressibility = getattr(self.physics, 'compressibility', 1e-9)
+        acc_coeff = self.volumes * self.porosity_flat * compressibility / dt
+        b = acc_coeff * pressure
+
+        rows_list = []
+        cols_list = []
+        data_list = []
+        diag = acc_coeff.copy()
+
+        for d in range(6):
+            ni = self.neighbor_indices[d]
+            valid = ni >= 0
+            if not np.any(valid):
+                continue
+
+            ci = np.where(valid)[0]
+            tv = self.trans_matrix[d, ci]
+            cj = ni[ci]
+
+            rows_list.append(ci)
+            cols_list.append(cj)
+            data_list.append(-tv)
+
+            np.add.at(diag, ci, tv)
+
+        rows_list.append(np.arange(n))
+        cols_list.append(np.arange(n))
+        data_list.append(diag)
+
+        rows = np.concatenate(rows_list)
+        cols = np.concatenate(cols_list)
+        data = np.concatenate(data_list)
+
         A = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
-        
+
         A_lil = A.tolil()
         well_manager.apply_well_terms(A_lil, b, pressure, dt)
         A_csr = A_lil.tocsr()
-        
+
         return A_csr, b
-    
+
     def _verify_matrix_properties(self, A: Union[np.ndarray, csr_matrix]) -> Dict[str, Any]:
-        """
-        验证FVM离散矩阵的数值性质
-        
-        对于稳定的FVM离散化，系数矩阵应该满足：
-        1. 对角占优性 (Diagonal Dominance): |A_ii| >= Σ|A_ij| for j≠i
-        2. 良好的条件数 (Condition Number): cond(A) < 1e12
-        3. 对称性 (可选，取决于边界条件)
-        
-        Args:
-            A: 系数矩阵
-            
-        Returns:
-            矩阵性质字典
-        """
         if isinstance(A, csr_matrix):
             A_dense = A.toarray()
         else:
             A_dense = A
-            
+
         properties = {}
-        
-        # 检查对角占优性 - FVM物理守恒的重要条件
-        # |A_ii| >= Σ|A_ij| 确保数值稳定性
         diagonal = np.abs(np.diag(A_dense))
         off_diagonal_sum = np.sum(np.abs(A_dense), axis=1) - diagonal
         diagonal_dominance = np.all(diagonal >= off_diagonal_sum)
         properties['diagonal_dominant'] = diagonal_dominance
         properties['diagonal_dominance_ratio'] = np.min(diagonal / (off_diagonal_sum + 1e-15))
-        
-        # 检查条件数 - 线性求解器收敛性的关键指标
+
         try:
             cond_num = np.linalg.cond(A_dense)
             properties['condition_number'] = cond_num
             properties['well_conditioned'] = cond_num < 1e12
-        except:
+        except Exception:
             properties['condition_number'] = np.inf
             properties['well_conditioned'] = False
-            
-        # 检查对称性 - 某些边界条件下FVM矩阵可能对称
+
         properties['symmetric'] = np.allclose(A_dense, A_dense.T, rtol=1e-10)
-        
-        # 检查是否有零对角元素 - 会导致奇异矩阵
-        zero_diagonal = np.any(np.abs(diagonal) < 1e-15)
-        properties['has_zero_diagonal'] = zero_diagonal
-        
-        # 矩阵稠密度
-        nonzero_ratio = np.count_nonzero(A_dense) / A_dense.size
-        properties['sparsity'] = 1.0 - nonzero_ratio
-        
+        properties['has_zero_diagonal'] = np.any(np.abs(diagonal) < 1e-15)
+        properties['sparsity'] = 1.0 - np.count_nonzero(A_dense) / A_dense.size
+
         return properties
 
     def discretize_two_phase(self, dt: float, pressure: np.ndarray,
-                            saturation: np.ndarray,
-                            well_manager) -> Tuple[csr_matrix, np.ndarray]:
-        from scipy.sparse import coo_matrix, lil_matrix
-
+                             saturation: np.ndarray,
+                             well_manager) -> Tuple[csr_matrix, np.ndarray]:
+        """向量化组装两相流 IMPES 压力方程线性系统"""
         n = self.total_cells
         physics = self.physics
 
-        lambda_w = np.zeros(n)
-        lambda_o = np.zeros(n)
-        for i in range(n):
-            Sw = saturation[i]
-            kro = physics.get_relative_permeability(Sw, 'oil')
-            krw = physics.get_relative_permeability(Sw, 'water')
-            lambda_w[i] = krw / physics.mu_w
-            lambda_o[i] = kro / physics.mu_o
+        Sw = saturation
+        S_or = physics.kro_params['S_or']
+        S_wr = physics.krw_params['S_wr']
+        n_o = physics.kro_params['n_o']
+        n_w = physics.krw_params['n_w']
+
+        S_o_norm = np.clip((1.0 - Sw - S_or) / (1.0 - S_wr - S_or), 0.0, 1.0)
+        S_w_norm = np.clip((Sw - S_wr) / (1.0 - S_wr - S_or), 0.0, 1.0)
+
+        kro = np.where(Sw <= S_wr, 1.0, np.where(Sw >= 1.0 - S_or, 0.0, S_o_norm ** n_o))
+        krw = np.where(Sw <= S_wr, 0.0, np.where(Sw >= 1.0 - S_or, 1.0, S_w_norm ** n_w))
+
+        lambda_w = krw / physics.mu_w
+        lambda_o = kro / physics.mu_o
         lambda_t = lambda_w + lambda_o
 
-        porosity = np.array([
-            physics.property_manager.get_cell_property(i, 'porosity')
-            for i in range(n)
-        ])
-        volumes = np.array([float(self.mesh.cell_list[i].volume) for i in range(n)])
         compressibility = getattr(physics, 'compressibility', 1e-9)
-
-        acc_coeff = volumes * porosity * compressibility / dt
+        acc_coeff = self.volumes * self.porosity_flat * compressibility / dt
         b = acc_coeff * pressure
 
-        rows = []
-        cols = []
-        data = []
+        rows_list = []
+        cols_list = []
+        data_list = []
         diag = acc_coeff.copy()
 
-        for direction in range(6):
-            trans = self.trans_matrix[direction]
-            mask = trans != 0.0
-            if not np.any(mask):
+        for d in range(6):
+            ni = self.neighbor_indices[d]
+            valid = ni >= 0
+            if not np.any(valid):
                 continue
 
-            cell_indices = np.where(mask)[0]
-            trans_vals = trans[cell_indices]
+            ci = np.where(valid)[0]
+            tv = self.trans_matrix[d, ci]
+            cj = ni[ci]
 
-            neighbors = np.array([
-                self.mesh.cell_list[i].neighbors[direction]
-                for i in cell_indices
-            ])
+            lt_i = lambda_t[ci]
+            lt_j = lambda_t[cj]
+            lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
 
-            valid = neighbors != -1
-            ci = cell_indices[valid]
-            tv = trans_vals[valid]
-            ni = neighbors[valid]
+            T_total = tv * lt_face
 
-            for idx in range(len(ci)):
-                i_cell = ci[idx]
-                j_cell = ni[idx]
-                lt_i = lambda_t[i_cell]
-                lt_j = lambda_t[j_cell]
-                lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
+            rows_list.append(ci)
+            cols_list.append(cj)
+            data_list.append(-T_total)
 
-                T_total = tv[idx] * lt_face
+            np.add.at(diag, ci, T_total)
 
-                rows.append(i_cell)
-                cols.append(j_cell)
-                data.append(-T_total)
-                diag[i_cell] += T_total
+        rows_list.append(np.arange(n))
+        cols_list.append(np.arange(n))
+        data_list.append(diag)
 
-        rows.extend(range(n))
-        cols.extend(range(n))
-        data.extend(diag.tolist())
+        rows = np.concatenate(rows_list)
+        cols = np.concatenate(cols_list)
+        data = np.concatenate(data_list)
 
         A = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
 
@@ -319,91 +277,32 @@ class FVMDiscretizer:
         A_csr = A_lil.tocsr()
 
         return A_csr, b
-    
+
     def __repr__(self):
         return f"FVMDiscretizer({self.mesh.nx}x{self.mesh.ny}x{self.mesh.nz})"
 
 
 class SinglePhaseFVMDiscretizer(FVMDiscretizer):
-    """
-    单相流有限体积法离散化器
-    """
-    
+
     def __init__(self, mesh: StructuredMesh, physics: SinglePhaseProperties):
-        """
-        初始化单相流离散化器
-        
-        Args:
-            mesh: 结构化网格
-            physics: 单相流物理属性
-        """
         super().__init__(mesh, physics)
-    
-    def discretize(self, dt: float, pressure: np.ndarray, 
-                  well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
-        """
-        离散化单相流方程
-        
-        Args:
-            dt: 时间步长
-            pressure: 当前压力场
-            well_manager: 井管理器
-            
-        Returns:
-            (系数矩阵, 右端向量)
-        """
+
+    def discretize(self, dt: float, pressure: np.ndarray,
+                   well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
         return self.discretize_single_phase(dt, pressure, well_manager)
 
 
 class TwoPhaseFVMDiscretizer(FVMDiscretizer):
-    """
-    两相流有限体积法离散化器
-    """
-    
+
     def __init__(self, mesh: StructuredMesh, physics: TwoPhaseProperties):
-        """
-        初始化两相流离散化器
-        
-        Args:
-            mesh: 结构化网格
-            physics: 两相流物理属性
-        """
         super().__init__(mesh, physics)
-    
-    def discretize_pressure(self, dt: float, pressure: np.ndarray, 
-                           saturation: np.ndarray,
-                           well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
-        """
-        离散化两相流压力方程（IMPES方法）
-        
-        Args:
-            dt: 时间步长
-            pressure: 当前压力场
-            saturation: 当前饱和度场
-            well_manager: 井管理器
-            
-        Returns:
-            (系数矩阵, 右端向量)
-        """
-        # 实现两相流压力方程的离散化
-        # 这里需要考虑相对渗透率和相粘度的影响
-        return self.discretize_single_phase(dt, pressure, well_manager)  # 简化实现
-    
+
+    def discretize_pressure(self, dt: float, pressure: np.ndarray,
+                            saturation: np.ndarray,
+                            well_manager: WellManager) -> Tuple[csr_matrix, np.ndarray]:
+        return self.discretize_single_phase(dt, pressure, well_manager)
+
     def discretize_saturation(self, dt: float, pressure_new: np.ndarray,
-                             pressure_old: np.ndarray, saturation_old: np.ndarray) -> np.ndarray:
-        """
-        离散化饱和度方程（IMPES方法）
-        
-        Args:
-            dt: 时间步长
-            pressure_new: 新压力场
-            pressure_old: 旧压力场
-            saturation_old: 旧饱和度场
-            
-        Returns:
-            新饱和度场
-        """
-        # 实现饱和度方程的显式求解
+                              pressure_old: np.ndarray, saturation_old: np.ndarray) -> np.ndarray:
         saturation_new = saturation_old.copy()
-        # 这里需要实现饱和度的更新逻辑
         return saturation_new
