@@ -30,10 +30,6 @@ dev = [
     "mkdocs-literate-nav>=0.6",
     "mkdocs-section-index>=0.3",
 ]
-notebook = [
-    "jupyter>=1.0",
-    "ipykernel>=6.0",
-]
 geostat = [
     "gstatsim>=1.2.0",
     "scikit-gstat>=1.0.23",

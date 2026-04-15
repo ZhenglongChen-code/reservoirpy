@@ -6,42 +6,29 @@
 
 import yaml
 import json
-import pandas as pd
 from typing import Dict, Any, List, Optional, Union
 import os
-import pyvista as pv
 import numpy as np
 
 
 def mesh_to_vtk(mesh, pressure=None, saturation=None, permeability=None, filename="reservoir.vtk", file_format="binary"):
-    """
-    将结构化网格和场数据保存为VTK文件
+    try:
+        import pyvista as pv
+    except ImportError:
+        raise ImportError("pyvista is required for VTK export. Install with: pip install reservoirpy[viz]")
 
-    Args:
-        mesh: StructuredMesh对象
-        pressure: 压力场数据数组
-        saturation: 饱和度场数据数组
-        permeability: 渗透率场数据数组
-        filename: 保存的VTK文件名
-        file_format: 文件格式，"binary"（默认，文件小）或"ascii"（可用文本编辑器查看）
-    """
-    # 创建节点坐标数组
     points = np.array([node.coord for node in mesh.node_list])
 
-    # 创建单元连接信息
     cells = []
     cell_types = []
 
     for cell in mesh.cell_list:
-        # 每个六面体单元有8个顶点
-        node_indices = cell.vertices  # 使用vertices属性而不是nodes
-        cells.extend([8] + node_indices)  # VTK格式: [n_points, point0, point1, ...]
+        node_indices = cell.vertices
+        cells.extend([8] + node_indices)
         cell_types.append(pv.CellType.HEXAHEDRON)
 
-    # 创建非结构化网格
     grid = pv.UnstructuredGrid(np.array(cells), np.array(cell_types), points)
 
-    # 添加场数据
     if pressure is not None:
         grid.cell_data["Pressure"] = pressure
 
@@ -51,10 +38,9 @@ def mesh_to_vtk(mesh, pressure=None, saturation=None, permeability=None, filenam
     if permeability is not None:
         grid.cell_data["Permeability"] = permeability
 
-    # 保存为VTK文件
     if file_format.lower() == "ascii":
         grid.save(filename, binary=False)
-        print(f"网格数据已保存到 {filename} (ASCII格式，可用文本编辑器查看)")
+        print(f"网格数据已保存到 {filename} (ASCII格式)")
     else:
         grid.save(filename, binary=True)
         print(f"网格数据已保存到 {filename} (二进制格式)")
@@ -114,6 +100,7 @@ def load_grid_data(file_path: str) -> np.ndarray:
     if file_path.endswith('.npy'):
         data = np.load(file_path)
     elif file_path.endswith('.csv'):
+        import pandas as pd
         data = pd.read_csv(file_path).values
     elif file_path.endswith('.txt'):
         data = np.loadtxt(file_path)
@@ -137,6 +124,7 @@ def save_grid_data(data: np.ndarray, file_path: str):
     if file_path.endswith('.npy'):
         np.save(file_path, data)
     elif file_path.endswith('.csv'):
+        import pandas as pd
         pd.DataFrame(data).to_csv(file_path, index=False)
     elif file_path.endswith('.txt'):
         np.savetxt(file_path, data)
@@ -158,6 +146,7 @@ def load_well_data(file_path: str) -> List[Dict[str, Any]]:
         with open(file_path, 'r', encoding='utf-8') as f:
             well_data = json.load(f)
     elif file_path.endswith('.csv'):
+        import pandas as pd
         df = pd.read_csv(file_path)
         well_data = df.to_dict('records')
     else:
@@ -181,6 +170,7 @@ def save_well_data(well_data: List[Dict[str, Any]], file_path: str):
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(well_data, f, indent=2, ensure_ascii=False)
     elif file_path.endswith('.csv'):
+        import pandas as pd
         df = pd.DataFrame(well_data)
         df.to_csv(file_path, index=False)
     else:
