@@ -27,6 +27,7 @@ import logging
 import numpy as np
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
+from reservoirpy.utils.units import uc
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -301,12 +302,12 @@ def _run_single_phase(req: SinglePhaseRequest) -> Dict:
         'type': 'single_phase',
         'permeability': perm.reshape(1, ny, nx),
         'porosity': req.porosity,
-        'viscosity': req.viscosity_mPas * 1e-3,
+        'viscosity': uc.mpas_to_pas(req.viscosity_mPas),
         'compressibility': 1e-9,
     })
 
     wells_config = [{'location': [0, w.y, w.x], 'control_type': 'bhp',
-                     'value': w.bhp_MPa * 1e6, 'rw': 0.1, 'skin_factor': 0}
+                     'value': uc.mpa_to_pa(w.bhp_MPa), 'rw': 0.1, 'skin_factor': 0}
                     for w in req.wells]
 
     well_manager = WellManager(mesh, wells_config)
@@ -316,9 +317,9 @@ def _run_single_phase(req: SinglePhaseRequest) -> Dict:
     well_manager.initialize_wells(k_field, physics.viscosity)
 
     model = SinglePhaseModel(mesh, physics, {})
-    state = model.initialize_state({'initial_pressure': req.initial_pressure_MPa * 1e6})
+    state = model.initialize_state({'initial_pressure': uc.mpa_to_pa(req.initial_pressure_MPa)})
 
-    total_time = req.total_time_days * 86400.0
+    total_time = uc.d_to_s(req.total_time_days)
     time_fracs = _get_time_fractions(req.n_time_slices)
     snap_times = time_fracs * total_time
 
@@ -351,7 +352,7 @@ def _run_single_phase(req: SinglePhaseRequest) -> Dict:
 
     p_all = np.stack(results)
     return {
-        'pressure_MPa': (p_all / 1e6),
+        'pressure_MPa': uc.pa_to_mpa(p_all),
         'time_days': (time_fracs * req.total_time_days).astype(np.float32),
         'time_fractions': time_fracs.tolist(),
         'permeability_mD': perm,
@@ -385,12 +386,12 @@ def _run_two_phase(req: TwoPhaseRequest) -> Dict:
         'permeability': perm.reshape(1, ny, nx),
         'porosity': req.porosity,
         'compressibility': 1e-9,
-        'oil_viscosity': req.oil_viscosity_mPas * 1e-3,
-        'water_viscosity': req.water_viscosity_mPas * 1e-3,
+        'oil_viscosity': uc.mpas_to_pas(req.oil_viscosity_mPas),
+        'water_viscosity': uc.mpas_to_pas(req.water_viscosity_mPas),
     })
 
     wells_config = [{'location': [0, w.y, w.x], 'control_type': 'bhp',
-                     'value': w.bhp_MPa * 1e6, 'rw': 0.1, 'skin_factor': 0}
+                     'value': uc.mpa_to_pa(w.bhp_MPa), 'rw': 0.1, 'skin_factor': 0}
                     for w in req.wells]
 
     well_manager = WellManager(mesh, wells_config)
@@ -401,12 +402,12 @@ def _run_two_phase(req: TwoPhaseRequest) -> Dict:
 
     model = TwoPhaseIMPES(mesh, physics, {'cfl_factor': 0.8})
     state = model.initialize_state({
-        'initial_pressure': req.initial_pressure_MPa * 1e6,
+        'initial_pressure': uc.mpa_to_pa(req.initial_pressure_MPa),
         'initial_saturation': req.initial_saturation,
     })
 
-    total_time = req.total_time_days * 86400.0
-    dt_max = 30 * 86400.0
+    total_time = uc.d_to_s(req.total_time_days)
+    dt_max = uc.d_to_s(30)
     time_fracs = _get_time_fractions(req.n_time_slices)
     snap_times = time_fracs * total_time
 
@@ -440,7 +441,7 @@ def _run_two_phase(req: TwoPhaseRequest) -> Dict:
         well_bhp[w.y, w.x] = w.bhp_MPa
 
     return {
-        'pressure_MPa': np.stack(p_results) / 1e6,
+        'pressure_MPa': uc.pa_to_mpa(np.stack(p_results)),
         'saturation': np.stack(sw_results),
         'time_days': (time_fracs * req.total_time_days).astype(np.float32),
         'time_fractions': time_fracs.tolist(),

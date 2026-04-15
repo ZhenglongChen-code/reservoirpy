@@ -8,6 +8,7 @@ import numpy as np
 from typing import Dict, Any, Union
 from abc import ABC, abstractmethod
 from reservoirpy.mesh.mesh import StructuredMesh
+from reservoirpy.utils.units import uc
 
 
 class BasePhysics(ABC):
@@ -72,10 +73,9 @@ class PropertyManager:
     
     def _init_permeability(self, config: Dict[str, Any]) -> Union[float, np.ndarray]:
         perm_value = config.get('permeability', 100.0)
-        mD_to_m2 = 9.869233e-16
 
         if isinstance(perm_value, (int, float)):
-            return float(perm_value) * mD_to_m2
+            return uc.md_to_m2(float(perm_value))
         elif isinstance(perm_value, np.ndarray):
             if perm_value.ndim == 1:
                 nx, ny, nz = self.mesh.grid_shape
@@ -84,7 +84,7 @@ class PropertyManager:
                 perm_3d = perm_value
             else:
                 raise ValueError("Permeability array must be 1D or 3D")
-            return perm_3d * mD_to_m2
+            return uc.md_to_m2(perm_3d)
         else:
             raise ValueError("Permeability must be a number or numpy array")
 

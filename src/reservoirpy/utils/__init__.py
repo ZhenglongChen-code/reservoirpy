@@ -5,7 +5,7 @@
 """
 
 from .io import load_config, save_config, mesh_to_vtk, ConfigManager
-from .units import UnitConverter
+from .units import UnitConverter, uc
 from .validation import validate_config, ConfigValidator
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     'mesh_to_vtk',
     'ConfigManager',
     'UnitConverter',
+    'uc',
     'validate_config',
     'ConfigValidator'
 ]
