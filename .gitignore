@@ -30,6 +30,7 @@ Thumbs.db
 # Project specific
 /design_docs/
 results/
+data/
 *.vtk
 *.png
 !docs/**/*.png
