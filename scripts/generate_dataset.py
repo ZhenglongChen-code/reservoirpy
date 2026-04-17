@@ -23,7 +23,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
-from reservoirpy.utils.units import uc
+from reservoirpy.utils.units import mpa_to_pa, mpas_to_pas, d_to_s, s_to_d
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ DX = DY = 50.0
 DZ = 10.0
 N_TIME_SLICES = 10
 TIME_FRACTIONS = np.array([0.01, 0.03, 0.06, 0.10, 0.15, 0.22, 0.32, 0.45, 0.65, 1.0])
-TOTAL_TIME = uc.d_to_s(365)
+TOTAL_TIME = d_to_s(365)
 
 
 @dataclass
@@ -146,7 +146,7 @@ def run_simulation(cfg: SampleConfig, perm_field: np.ndarray) -> List[np.ndarray
         'type': 'single_phase',
         'permeability': perm_field.reshape(1, ny, nx),
         'porosity': cfg.porosity,
-        'viscosity': uc.mpas_to_pas(cfg.viscosity_mPas),
+        'viscosity': mpas_to_pas(cfg.viscosity_mPas),
         'compressibility': cfg.compressibility,
     })
 
@@ -155,7 +155,7 @@ def run_simulation(cfg: SampleConfig, perm_field: np.ndarray) -> List[np.ndarray
         wells_config.append({
             'location': [0, w['y'], w['x']],
             'control_type': 'bhp',
-            'value': uc.mpa_to_pa(w['bhp_MPa']),
+            'value': mpa_to_pa(w['bhp_MPa']),
             'rw': w['rw'],
             'skin_factor': w['skin'],
         })
@@ -168,7 +168,7 @@ def run_simulation(cfg: SampleConfig, perm_field: np.ndarray) -> List[np.ndarray
 
     model = SinglePhaseModel(mesh, physics, {})
     state = model.initialize_state({
-        'initial_pressure': uc.mpa_to_pa(cfg.initial_pressure_MPa),
+        'initial_pressure': mpa_to_pa(cfg.initial_pressure_MPa),
     })
 
     snap_times = TIME_FRACTIONS * TOTAL_TIME
@@ -345,7 +345,7 @@ def generate_dataset(
         'grid_size': GRID_SIZE,
         'n_time_slices': N_TIME_SLICES,
         'time_fractions': TIME_FRACTIONS.tolist(),
-        'total_time_days': uc.s_to_d(TOTAL_TIME),
+        'total_time_days': s_to_d(TOTAL_TIME),
         'dx': DX, 'dy': DY, 'dz': DZ,
         'shapes': {
             'log_perm_norm': f'({len(all_samples)}, {GRID_SIZE}, {GRID_SIZE})',

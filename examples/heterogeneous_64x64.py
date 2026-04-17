@@ -14,7 +14,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from reservoirpy.utils.units import uc
+from reservoirpy.utils.units import mpa_to_pa, pa_to_mpa, d_to_s, s_to_d
 
 
 def generate_perm_field():
@@ -70,15 +70,15 @@ def run_single_phase(perm_field):
 
     wells_config = [
         {'location': [0, 32, 32], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(40), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(40), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 0, 0], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 0, 63], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 63, 0], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 63, 63], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
     ]
 
     well_manager = WellManager(mesh, wells_config)
@@ -88,10 +88,10 @@ def run_single_phase(perm_field):
     well_manager.initialize_wells(k_field, physics.viscosity)
 
     model = SinglePhaseModel(mesh, physics, {})
-    state = model.initialize_state({'initial_pressure': uc.mpa_to_pa(30)})
+    state = model.initialize_state({'initial_pressure': mpa_to_pa(30)})
 
-    total_time = uc.d_to_s(365)
-    dt = uc.d_to_s(10)
+    total_time = d_to_s(365)
+    dt = d_to_s(10)
     current_time = 0.0
     step = 0
 
@@ -101,9 +101,9 @@ def run_single_phase(perm_field):
         current_time += dt
         step += 1
         if step % 5 == 0:
-            print(f"      t={uc.s_to_d(current_time):.0f}d | "
-                  f"P=[{uc.pa_to_mpa(state['pressure'].min()):.2f}, "
-                  f"{uc.pa_to_mpa(state['pressure'].max()):.2f}] MPa")
+            print(f"      t={s_to_d(current_time):.0f}d | "
+                  f"P=[{pa_to_mpa(state['pressure'].min()):.2f}, "
+                  f"{pa_to_mpa(state['pressure'].max()):.2f}] MPa")
 
     print(f"      单相流模拟完成！共 {step} 步")
     return state, mesh, well_manager
@@ -134,15 +134,15 @@ def run_two_phase(perm_field):
 
     wells_config = [
         {'location': [0, 32, 32], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(40), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(40), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 0, 0], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 0, 63], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 63, 0], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
         {'location': [0, 63, 63], 'control_type': 'bhp',
-         'value': uc.mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
+         'value': mpa_to_pa(20), 'rw': 0.1, 'skin_factor': 0},
     ]
 
     well_manager = WellManager(mesh, wells_config)
@@ -153,12 +153,12 @@ def run_two_phase(perm_field):
 
     model = TwoPhaseIMPES(mesh, physics, {'cfl_factor': 0.8})
     state = model.initialize_state({
-        'initial_pressure': uc.mpa_to_pa(30),
+        'initial_pressure': mpa_to_pa(30),
         'initial_saturation': 0.2,
     })
 
-    total_time = uc.d_to_s(5 * 365)
-    dt_max = uc.d_to_s(30)
+    total_time = d_to_s(5 * 365)
+    dt_max = d_to_s(30)
     current_time = 0.0
     step = 0
 
@@ -183,7 +183,7 @@ def run_two_phase(perm_field):
         current_time += actual_dt
         step += 1
 
-        days = uc.s_to_d(current_time)
+        days = s_to_d(current_time)
         sw_avg = np.mean(state['saturation'])
 
         history_time.append(days)
@@ -196,7 +196,7 @@ def run_two_phase(perm_field):
                 snapshots[st] = state['saturation'].copy()
 
         if step % 10 == 0:
-            print(f"      t={days:>7.1f}d | dt={uc.s_to_d(actual_dt):.2f}d | "
+            print(f"      t={days:>7.1f}d | dt={s_to_d(actual_dt):.2f}d | "
                   f"<Sw>={sw_avg:.4f} | Sw_inj={state['saturation'][inj_cell]:.4f}")
 
     print(f"      两相流模拟完成！共 {step} 步")
@@ -237,7 +237,7 @@ def plot_results(
     plt.colorbar(im, ax=ax0, shrink=0.75)
 
     ax1 = fig.add_subplot(gs[0, 1])
-    p_map = uc.pa_to_mpa(sp_state['pressure'].reshape(ny, nx))
+    p_map = pa_to_mpa(sp_state['pressure'].reshape(ny, nx))
     im = ax1.imshow(p_map, origin='lower', cmap='RdYlBu_r', aspect='equal')
     ax1.set_title('Single-Phase: Pressure (MPa)')
     ax1.set_xlabel('X'); ax1.set_ylabel('Y')
@@ -310,7 +310,7 @@ def plot_results(
     ax_hist.grid(True, alpha=0.3)
 
     ax_tp_p = fig.add_subplot(gs[2, 3])
-    tp_p = uc.pa_to_mpa(tp_state['pressure'].reshape(ny, nx))
+    tp_p = pa_to_mpa(tp_state['pressure'].reshape(ny, nx))
     im = ax_tp_p.imshow(tp_p, origin='lower', cmap='RdYlBu_r', aspect='equal')
     ax_tp_p.set_title('Two-Phase: Pressure (MPa)')
     ax_tp_p.set_xlabel('X'); ax_tp_p.set_ylabel('Y')

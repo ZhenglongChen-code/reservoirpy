@@ -159,7 +159,8 @@ class WellManager:
             well_cells.append(cell_index)
         return well_cells
 
-    def apply_well_terms(self, A, b: np.ndarray, pressure: np.ndarray, dt: float):
+    def apply_well_terms(self, A, b: np.ndarray, pressure: np.ndarray, dt: float,
+                         mobility_scale: np.ndarray = None):
         """
         将所有井项应用到线性系统
 
@@ -168,16 +169,20 @@ class WellManager:
             b: 右端向量
             pressure: 当前压力场
             dt: 时间步长
+            mobility_scale: 各单元有效流度缩放因子 (μ_ref * λ_t)，仅两相流使用
         """
         for well in self.wells:
             z, y, x = well.location
             cell_index = self.mesh.get_cell_index(z, y, x)
 
-            # 添加井项到右端向量
-            well.add_to_rhs(b, cell_index, pressure[cell_index])
-
-            # 添加井项到系数矩阵（仅定井底流压）
-            well.add_to_matrix(A, cell_index)
+            if mobility_scale is not None:
+                scale = mobility_scale[cell_index]
+                effective_wi = well.well_index * scale
+                b[cell_index] += effective_wi * well.value
+                A[cell_index, cell_index] += effective_wi
+            else:
+                well.add_to_rhs(b, cell_index, pressure[cell_index])
+                well.add_to_matrix(A, cell_index)
 
     def get_well_production(self, pressure: np.ndarray, dt: float) -> Dict[str, float]:
         """

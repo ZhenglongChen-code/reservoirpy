@@ -231,6 +231,9 @@ class FVMDiscretizer:
         lambda_o = kro / physics.mu_o
         lambda_t = lambda_w + lambda_o
 
+        mu_ref = getattr(physics, 'viscosity', 1e-3)
+        mobility_scale = mu_ref * lambda_t
+
         compressibility = getattr(physics, 'compressibility', 1e-9)
         acc_coeff = self.volumes * self.porosity_flat * compressibility / dt
         b = acc_coeff * pressure
@@ -250,11 +253,11 @@ class FVMDiscretizer:
             tv = self.trans_matrix[d, ci]
             cj = ni[ci]
 
-            lt_i = lambda_t[ci]
-            lt_j = lambda_t[cj]
-            lt_face = 2.0 * lt_i * lt_j / (lt_i + lt_j + 1e-30)
+            ms_i = mobility_scale[ci]
+            ms_j = mobility_scale[cj]
+            ms_face = 2.0 * ms_i * ms_j / (ms_i + ms_j + 1e-30)
 
-            T_total = tv * lt_face
+            T_total = tv * ms_face
 
             rows_list.append(ci)
             cols_list.append(cj)
@@ -273,7 +276,7 @@ class FVMDiscretizer:
         A = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
 
         A_lil = A.tolil()
-        well_manager.apply_well_terms(A_lil, b, pressure, dt)
+        well_manager.apply_well_terms(A_lil, b, pressure, dt, mobility_scale=mobility_scale)
         A_csr = A_lil.tocsr()
 
         return A_csr, b
