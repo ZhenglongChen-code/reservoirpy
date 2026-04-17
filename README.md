@@ -232,6 +232,45 @@ config = {
 }
 ```
 
+## ⚡ 并行数据生成
+
+使用 `ProcessPoolExecutor` 并行生成训练数据，充分利用多核 CPU：
+
+```bash
+# 两相流并行示例：20 个样本，4 workers
+uv run --extra geostat python scripts/example_parallel_two_phase.py
+```
+
+示例输出：
+
+```
+============================================================
+  性能对比
+============================================================
+  串行:      30.4s
+  并行(4w): 9.4s
+  加速比:    3.22x
+```
+
+核心代码：
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+
+def generate_one_sample(seed):
+    # 创建 mesh、physics、model，运行模拟，返回结果
+    ...
+
+# 串行
+results = [generate_one_sample(i) for i in range(20)]
+
+# 并行（4 workers）
+with ProcessPoolExecutor(max_workers=4) as executor:
+    results = list(executor.map(generate_one_sample, range(20)))
+```
+
+> **提示**：每个 worker 是独立进程，不共享内存。`generate_one_sample` 必须是自包含函数（内部创建 mesh/physics/model），不能依赖外部全局状态。
+
 ## 🧪 测试
 
 ```bash
