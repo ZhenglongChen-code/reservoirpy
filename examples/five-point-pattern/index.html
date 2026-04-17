@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>五点井网模拟 - ReservoirPy</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #333; line-height: 1.6; }
+    h1 { color: #1a237e; border-bottom: 2px solid #1a237e; padding-bottom: 8px; }
+    h2 { color: #283593; margin-top: 30px; }
+    .gif-container { text-align: center; margin: 20px 0; }
+    .gif-container img { max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .back-link { display: inline-block; margin-bottom: 20px; color: #1a237e; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    th { background: #e8eaf6; }
+    code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <a class="back-link" href="../">&#8592; 返回示例</a>
+  <h1>五点井网水驱模拟</h1>
+
+  <h2>问题描述</h2>
+  <p>经典五点井网：中心 1 口注入井 + 四角 4 口生产井，模拟水驱油过程。</p>
+
+  <table>
+    <tr><th>参数</th><th>值</th></tr>
+    <tr><td>网格</td><td>32 × 32 × 1</td></tr>
+    <tr><td>网格尺寸</td><td>50m × 50m × 10m</td></tr>
+    <tr><td>渗透率</td><td>非均质（SGSIM 随机场）</td></tr>
+    <tr><td>初始压力</td><td>30 MPa</td></tr>
+    <tr><td>初始含水饱和度</td><td>0.0（纯油藏）</td></tr>
+    <tr><td>注入井 BHP</td><td>40 MPa（中心 16,16）</td></tr>
+    <tr><td>生产井 BHP</td><td>20 MPa（四角 2,2 / 29,2 / 2,29 / 29,29）</td></tr>
+    <tr><td>模拟时间</td><td>3 年</td></tr>
+  </table>
+
+  <h2>模拟动画</h2>
+  <div class="gif-container">
+    <img src="five_point_pattern.gif" alt="五点井网两相流动画">
+  </div>
+  <p>左：渗透率场（静态）；中：压力场动画（注入井高压→生产井低压）；右：含水饱和度动画（水从中心向四角辐射推进）</p>
+
+  <h2>关键物理机制</h2>
+  <ul>
+    <li><strong>水驱前缘</strong>：水从中心注入井向四角生产井辐射推进</li>
+    <li><strong>压力梯度</strong>：注入井高压驱动流体向低压生产井流动</li>
+    <li><strong>分流函数</strong>：上游权重确保物理一致性</li>
+    <li><strong>CFL 自适应</strong>：自动控制时间步长保证稳定性</li>
+  </ul>
+</body>
+</html>
