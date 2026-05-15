@@ -6,10 +6,14 @@ One 64x64 permeability field + five-spot wells → simulations at 16x16, 32x32,
 averaging; well positions are remapped through normalised coordinates.
 
 Run with:
-    PYTHONPATH=src python examples/jax_multiresolution.py
+    python examples/jax_multiresolution.py
 """
 
+import sys
+import os
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import matplotlib.pyplot as plt
 import numpy as np
