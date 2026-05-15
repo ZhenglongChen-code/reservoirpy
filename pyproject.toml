@@ -40,6 +40,9 @@ api = [
     "psutil>=5.9",
     "oss2>=2.18",
 ]
+jax = [
+    "jax>=0.4.25",
+]
 
 [build-system]
 requires = ["hatchling"]
