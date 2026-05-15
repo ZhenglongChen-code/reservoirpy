@@ -1,5 +1,5 @@
 """
-Multi-resolution training data generator using JAX.
+Multi-resolution training data generator using JAX (multi-GPU support).
 
 Generates 3000 samples at 16×16, 32×32, 64×64, 128×128 from the *same*
 fine-scale (128×128) permeability field.  Each sample:
@@ -14,8 +14,14 @@ Output layout:
         64x64/  data.npz  metadata.json
         128x128/ data.npz metadata.json
 
-Run:
+Single GPU:
     python scripts/generate_jax_multires_data.py
+
+Multi-GPU (2 cards):
+    CUDA_VISIBLE_DEVICES=0 python scripts/generate_jax_multires_data.py --shard 0 --num-shards 2 &
+    CUDA_VISIBLE_DEVICES=1 python scripts/generate_jax_multires_data.py --shard 1 --num-shards 2 &
+    wait
+    python scripts/generate_jax_multires_data.py --merge --num-shards 2
 """
 
 import sys
@@ -23,6 +29,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import argparse
 import json
 import logging
 import time
@@ -36,7 +43,7 @@ from reservoirpy.models.jax_single_phase import (
 )
 from reservoirpy.utils.units import uc
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [shard %(shard)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 RESOLUTIONS = [16, 32, 64, 128]
@@ -174,13 +181,16 @@ def encode_well(well_y: int, well_x: int, bhp_MPa: float,
     return well_mask, well_value
 
 
-def main():
-    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+def generate_shard(shard: int, num_shards: int, output_root: str):
+    sample_indices = list(range(shard, N_SAMPLES, num_shards))
+    n_shard = len(sample_indices)
 
-    logger.info(f"Generating {N_SAMPLES} samples at resolutions {RESOLUTIONS}")
-    logger.info(f"Fine grid: {NX_FINE}×{NY_FINE}, domain: "
-                f"{NX_FINE*DX:.0f}×{NY_FINE*DY:.0f} m")
-    logger.info(f"Output root: {OUTPUT_ROOT}")
+    log_fmt = logging.Formatter(f"%(asctime)s [shard {shard}] %(message)s")
+    for h in logging.getLogger().handlers:
+        h.setFormatter(log_fmt)
+
+    logger.info(f"Generating {n_shard} samples (indices {sample_indices[0]}..{sample_indices[-1]}, "
+                f"step={num_shards}) at resolutions {RESOLUTIONS}")
 
     accumulators = {}
     for res in RESOLUTIONS:
@@ -193,7 +203,7 @@ def main():
 
     t0 = time.time()
 
-    for i in range(N_SAMPLES):
+    for count, i in enumerate(sample_indices):
         cfg = random_config(i)
 
         try:
@@ -237,25 +247,23 @@ def main():
             logger.error(f"Sample {i} failed: {e}")
             continue
 
-        if (i + 1) % 50 == 0:
+        if (count + 1) % 50 == 0:
             elapsed = time.time() - t0
-            rate = (i + 1) / elapsed
-            eta = (N_SAMPLES - i - 1) / rate
-            logger.info(f"  [{i+1}/{N_SAMPLES}] "
+            rate = (count + 1) / elapsed
+            eta = (n_shard - count - 1) / rate
+            logger.info(f"  [{count+1}/{n_shard}] "
                         f"elapsed={elapsed:.0f}s, rate={rate:.1f} samples/s, "
                         f"ETA={eta:.0f}s")
 
-    total_elapsed = time.time() - t0
-    logger.info(f"Simulation done in {total_elapsed:.0f}s, saving...")
+    logger.info(f"Simulation done in {time.time()-t0:.0f}s, saving shard...")
 
     for res in RESOLUTIONS:
         acc = accumulators[res]
         n = len(acc["pressure_MPa"])
         if n == 0:
-            logger.warning(f"  {res}x{res}: no samples, skipping")
             continue
 
-        out_dir = os.path.join(OUTPUT_ROOT, f"{res}x{res}")
+        out_dir = os.path.join(output_root, f"{res}x{res}")
         os.makedirs(out_dir, exist_ok=True)
 
         pressure_MPa = np.stack(acc["pressure_MPa"])
@@ -263,6 +271,51 @@ def main():
         well_mask = np.stack(acc["well_mask"])
         well_value = np.stack(acc["well_value"])
 
+        npz_path = os.path.join(out_dir, f"shard_{shard}.npz")
+        np.savez_compressed(
+            npz_path,
+            pressure_MPa=pressure_MPa,
+            permeability_mD=permeability_mD,
+            well_mask=well_mask,
+            well_value=well_value,
+        )
+        npz_size = os.path.getsize(npz_path) / 1e6
+        logger.info(f"  {res}x{res}: {n} samples, {npz_size:.1f} MB → {npz_path}")
+
+    logger.info(f"Shard {shard} done!")
+
+
+def merge_shards(num_shards: int, output_root: str):
+    logger.info(f"Merging {num_shards} shards into final datasets...")
+
+    for res in RESOLUTIONS:
+        out_dir = os.path.join(output_root, f"{res}x{res}")
+        shard_files = [os.path.join(out_dir, f"shard_{s}.npz")
+                       for s in range(num_shards)]
+        existing = [f for f in shard_files if os.path.exists(f)]
+
+        if not existing:
+            logger.warning(f"  {res}x{res}: no shard files found, skipping")
+            continue
+
+        all_pressure = []
+        all_perm = []
+        all_mask = []
+        all_value = []
+
+        for f in existing:
+            d = np.load(f)
+            all_pressure.append(d["pressure_MPa"])
+            all_perm.append(d["permeability_mD"])
+            all_mask.append(d["well_mask"])
+            all_value.append(d["well_value"])
+
+        pressure_MPa = np.concatenate(all_pressure, axis=0)
+        permeability_mD = np.concatenate(all_perm, axis=0)
+        well_mask = np.concatenate(all_mask, axis=0)
+        well_value = np.concatenate(all_value, axis=0)
+
+        n = pressure_MPa.shape[0]
         npz_path = os.path.join(out_dir, "data.npz")
         np.savez_compressed(
             npz_path,
@@ -288,6 +341,7 @@ def main():
             "time_fractions": TIME_FRACTIONS.tolist(),
             "fine_grid_size": NX_FINE,
             "upscaling_method": "geometric_mean_block_average",
+            "num_shards": num_shards,
             "shapes": {
                 "pressure_MPa": f"({n}, {N_TIME_SLICES}, {res}, {res})",
                 "permeability_mD": f"({n}, {res}, {res})",
@@ -300,9 +354,35 @@ def main():
         with open(os.path.join(out_dir, "metadata.json"), "w") as f:
             json.dump(metadata, f, indent=2)
 
-        logger.info(f"  {res}x{res}: {n} samples, {npz_size:.1f} MB → {out_dir}")
+        for sf in existing:
+            os.remove(sf)
 
-    logger.info(f"All done! Total time: {time.time()-t0:.0f}s")
+        logger.info(f"  {res}x{res}: {n} samples, {npz_size:.1f} MB → {npz_path}")
+
+    logger.info("Merge done!")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Multi-resolution training data generator (multi-GPU)")
+    parser.add_argument("--shard", type=int, default=None,
+                        help="Shard index (0-based). If omitted, runs all samples on one device.")
+    parser.add_argument("--num-shards", type=int, default=1,
+                        help="Total number of shards (GPUs). Default: 1")
+    parser.add_argument("--merge", action="store_true",
+                        help="Merge previously generated shards into final data.npz")
+    parser.add_argument("--output", type=str, default=OUTPUT_ROOT,
+                        help=f"Output root directory. Default: {OUTPUT_ROOT}")
+    args = parser.parse_args()
+
+    if args.merge:
+        merge_shards(args.num_shards, args.output)
+        return
+
+    if args.shard is not None:
+        generate_shard(args.shard, args.num_shards, args.output)
+    else:
+        generate_shard(0, 1, args.output)
 
 
 if __name__ == "__main__":
