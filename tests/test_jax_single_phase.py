@@ -5,7 +5,12 @@ jax = pytest.importorskip("jax")
 
 from reservoirpy.core.well_model import WellManager
 from reservoirpy.mesh.mesh import StructuredMesh
-from reservoirpy.models.jax_single_phase import JaxSinglePhaseCG
+from reservoirpy.models.jax_single_phase import (
+    JaxSinglePhaseCG,
+    interpolate_to_fine,
+    remap_well_positions,
+    resample_perm_field,
+)
 from reservoirpy.models.single_phase.single_phase_model import SinglePhaseModel
 from reservoirpy.physics.physics import SinglePhaseProperties
 
@@ -76,3 +81,66 @@ def test_jax_single_phase_default_grid_is_64x64():
     solver = JaxSinglePhaseCG(wells_config=[])
     pressure = solver.initialize_pressure()
     assert pressure.shape == (64, 64)
+
+
+class TestResamplePermField:
+    def test_homogeneous_field_unchanged(self):
+        perm = np.full((1, 64, 64), 100.0)
+        coarse = resample_perm_field(perm, 16, 16)
+        assert coarse.shape == (1, 16, 16)
+        np.testing.assert_allclose(coarse, 100.0)
+
+    def test_geometric_mean_upscaling(self):
+        block = np.array([[1.0, 4.0], [9.0, 36.0]])
+        perm = block.reshape(1, 2, 2)
+        coarse = resample_perm_field(perm, 1, 1)
+        expected = np.exp(np.mean(np.log(block)))
+        np.testing.assert_allclose(coarse.ravel(), [expected], rtol=1e-12)
+
+    def test_2d_input(self):
+        perm = np.full((64, 64), 50.0)
+        coarse = resample_perm_field(perm, 32, 32)
+        assert coarse.shape == (32, 32)
+        np.testing.assert_allclose(coarse, 50.0)
+
+    def test_non_divisible_raises(self):
+        with pytest.raises(ValueError):
+            resample_perm_field(np.zeros((10, 10)), 3, 3)
+
+
+class TestRemapWellPositions:
+    def test_identity_mapping(self):
+        wells = [{"location": [0, 4, 8], "control_type": "bhp", "value": 1e6}]
+        out = remap_well_positions(wells, 16, 16, 16, 16)
+        assert out[0]["location"] == [0, 4, 8]
+
+    def test_fine_to_coarse_center_well(self):
+        wells = [{"location": [0, 32, 32], "control_type": "bhp", "value": 1e6}]
+        out = remap_well_positions(wells, 64, 64, 16, 16)
+        assert out[0]["location"] == [0, 8, 8]
+
+    def test_fine_to_coarse_corner_well(self):
+        wells = [{"location": [0, 0, 0], "control_type": "bhp", "value": 1e6}]
+        out = remap_well_positions(wells, 64, 64, 16, 16)
+        assert out[0]["location"] == [0, 0, 0]
+
+    def test_preserves_other_keys(self):
+        wells = [{"location": [0, 10, 10], "control_type": "bhp",
+                  "value": 1e6, "rw": 0.1, "skin_factor": 2.0}]
+        out = remap_well_positions(wells, 64, 64, 16, 16)
+        assert out[0]["control_type"] == "bhp"
+        assert out[0]["value"] == 1e6
+        assert out[0]["rw"] == 0.1
+
+
+class TestInterpolateToFine:
+    def test_constant_field(self):
+        coarse = np.full((4, 4), 30.0)
+        fine = interpolate_to_fine(coarse, 8, 8)
+        assert fine.shape == (8, 8)
+        np.testing.assert_allclose(fine, 30.0)
+
+    def test_3d_temporal_stack(self):
+        coarse = np.full((5, 4, 4), 30.0)
+        fine = interpolate_to_fine(coarse, 8, 8)
+        assert fine.shape == (5, 8, 8)

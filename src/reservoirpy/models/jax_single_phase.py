@@ -208,6 +208,185 @@ def _solve_pressure_step(
     return pressure_new, iterations, residual_norm
 
 
+def resample_perm_field(
+    perm: Any,
+    target_nx: int,
+    target_ny: int,
+) -> np.ndarray:
+    """Downsample a permeability field via geometric-mean block averaging.
+
+    Each coarse cell covers a block of fine cells.  The coarse value is the
+    geometric mean of the fine cells inside the block, which is equivalent to
+    the arithmetic mean of log-permeability — the standard upscaling approach
+    in reservoir engineering.
+
+    Args:
+        perm: fine-scale permeability (ny_src, nx_src) or (1, ny_src, nx_src),
+              any unit (mD or m²) — the function is unit-agnostic.
+        target_nx: target x-dimension.
+        target_ny: target y-dimension.
+
+    Returns:
+        Coarse permeability array with the same ndim as *perm*.
+    """
+    squeeze = False
+    arr = np.asarray(perm, dtype=np.float64)
+    if arr.ndim == 3:
+        arr = arr.reshape(arr.shape[1], arr.shape[2])
+        squeeze = True
+    ny_src, nx_src = arr.shape
+
+    if ny_src % target_ny != 0:
+        raise ValueError(f"ny_src={ny_src} must be divisible by target_ny={target_ny}")
+    if nx_src % target_nx != 0:
+        raise ValueError(f"nx_src={nx_src} must be divisible by target_nx={target_nx}")
+
+    by = ny_src // target_ny
+    bx = nx_src // target_nx
+
+    log_k = np.log(np.maximum(arr, 1e-30))
+    log_k_coarse = log_k.reshape(target_ny, by, target_nx, bx).mean(axis=(1, 3))
+    coarse = np.exp(log_k_coarse)
+
+    if squeeze:
+        coarse = coarse[np.newaxis, :, :]
+    return coarse
+
+
+def remap_well_positions(
+    wells: Iterable[Dict[str, Any]],
+    nx_src: int,
+    ny_src: int,
+    nx_dst: int,
+    ny_dst: int,
+) -> List[Dict[str, Any]]:
+    """Remap well grid indices from a source resolution to a destination resolution.
+
+    Conversion path:  fine-grid (y, x) → normalised (y_frac, x_frac) ∈ [0, 1)
+    → coarse-grid (y', x').
+
+    All other well keys (control_type, value, rw, skin_factor, …) are preserved.
+    """
+    remapped = []
+    for w in wells:
+        z, y, x = w["location"]
+        y_frac = (y + 0.5) / ny_src
+        x_frac = (x + 0.5) / nx_src
+        y_new = min(int(y_frac * ny_dst), ny_dst - 1)
+        x_new = min(int(x_frac * nx_dst), nx_dst - 1)
+        w_new = dict(w)
+        w_new["location"] = [z, y_new, x_new]
+        remapped.append(w_new)
+    return remapped
+
+
+def interpolate_to_fine(
+    field_coarse: np.ndarray,
+    nx_fine: int,
+    ny_fine: int,
+) -> np.ndarray:
+    """Bilinear interpolation of a coarse 2D field to a fine grid.
+
+    Convenience wrapper around ``scipy.ndimage.zoom`` so that multi-resolution
+    pressure fields can be visually compared on the same grid.
+    """
+    from scipy.ndimage import zoom
+
+    ny_c, nx_c = field_coarse.shape[-2], field_coarse.shape[-1]
+    factors = (ny_fine / ny_c, nx_fine / nx_c)
+    if field_coarse.ndim == 3:
+        factors = (1.0,) + factors
+    return zoom(field_coarse, factors, order=1)
+
+
+def run_multiresolution(
+    perm_fine: Any,
+    wells_fine: Iterable[Dict[str, Any]],
+    Lx: float,
+    Ly: float,
+    dz: float,
+    resolutions: Iterable[Tuple[int, int]],
+    dt: float,
+    n_steps: int,
+    initial_pressure: float,
+    viscosity: float,
+    compressibility: float,
+    porosity: Any,
+    cg_tolerance: float = 1e-8,
+    cg_maxiter: int = 1000,
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
+    """Run single-phase simulation at multiple grid resolutions.
+
+    The physical domain (Lx × Ly) is identical across resolutions; only the
+    grid spacing changes.  Permeability is upscaled with :func:`resample_perm_field`
+    and well positions are remapped with :func:`remap_well_positions`.
+
+    Args:
+        perm_fine: fine-scale permeability (1, ny_fine, nx_fine) or
+                   (ny_fine, nx_fine), in mD.
+        wells_fine: well list with fine-grid ``location`` indices.
+        Lx, Ly: physical domain size (m).
+        dz: cell thickness (m).
+        resolutions: iterable of ``(nx, ny)`` pairs, e.g.
+                     ``[(16, 16), (32, 32), (64, 64)]``.
+        dt: time step (s).
+        n_steps: number of time steps.
+        initial_pressure: initial pressure (Pa).
+        viscosity: fluid viscosity (Pa·s).
+        compressibility: rock compressibility (1/Pa).
+        porosity: porosity (scalar or array).
+        cg_tolerance: CG convergence tolerance.
+        cg_maxiter: CG maximum iterations.
+
+    Returns:
+        ``{(nx, ny): result_dict}`` — one entry per resolution, each with the
+        same keys as :meth:`JaxSinglePhaseCG.run`.
+    """
+    perm_arr = np.asarray(perm_fine, dtype=np.float64)
+    if perm_arr.ndim == 3:
+        ny_fine, nx_fine = perm_arr.shape[1], perm_arr.shape[2]
+    else:
+        ny_fine, nx_fine = perm_arr.shape
+
+    results: Dict[Tuple[int, int], Dict[str, Any]] = {}
+
+    for nx, ny in resolutions:
+        dx = Lx / nx
+        dy = Ly / ny
+
+        if nx == nx_fine and ny == ny_fine:
+            perm = perm_fine
+            wells = list(wells_fine)
+        else:
+            perm = resample_perm_field(perm_fine, nx, ny)
+            wells = remap_well_positions(wells_fine, nx_fine, ny_fine, nx, ny)
+
+        solver = JaxSinglePhaseCG(
+            nx=nx,
+            ny=ny,
+            dx=dx,
+            dy=dy,
+            dz=dz,
+            permeability_mD=perm,
+            porosity=porosity,
+            viscosity=viscosity,
+            compressibility=compressibility,
+            wells_config=wells,
+            cg_tolerance=cg_tolerance,
+            cg_maxiter=cg_maxiter,
+        )
+
+        result = solver.run(
+            initial_pressure=initial_pressure,
+            dt=dt,
+            n_steps=n_steps,
+            return_history=True,
+        )
+        results[(nx, ny)] = result
+
+    return results
+
+
 class JaxSinglePhaseCG:
     """
     Minimal 2D single-phase JAX prototype.
