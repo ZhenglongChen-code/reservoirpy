@@ -67,11 +67,12 @@ def main():
         print(f"  {nx}x{ny}: P=[{p.min():.2f}, {p.max():.2f}] MPa, "
               f"CG iters={last_cg.iterations}")
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 11))
+    fig, axes = plt.subplots(3, 3, figsize=(18, 15))
     fig.suptitle("Multi-Resolution Single-Phase Pressure (JAX CG)", fontsize=15)
 
     for col, (nx, ny) in enumerate(resolutions):
         p_final = uc.pa_to_mpa(results[(nx, ny)]["pressure"])
+
         ax = axes[0, col]
         im = ax.imshow(p_final, origin="lower", cmap="RdYlBu_r", aspect="equal")
         ax.set_title(f"{nx}×{ny} final P (MPa)")
@@ -84,17 +85,17 @@ def main():
         plt.colorbar(im, ax=ax, shrink=0.8)
 
     p_ref = uc.pa_to_mpa(results[(64, 64)]["pressure"])
-    fig2, axes2 = plt.subplots(1, len(resolutions) - 1, figsize=(14, 4.5))
-    fig2.suptitle("Difference from 64×64 reference (interpolated to fine grid)", fontsize=13)
     for col, (nx, ny) in enumerate(resolutions[:-1]):
         p_coarse = uc.pa_to_mpa(results[(nx, ny)]["pressure"])
         p_coarse_fine = interpolate_to_fine(p_coarse, nx_fine, ny_fine)
         diff = p_coarse_fine - p_ref
-        ax = axes2[col]
+        ax = axes[2, col]
         vmax = max(np.abs(diff).max(), 0.01)
         im = ax.imshow(diff, origin="lower", cmap="bwr", vmin=-vmax, vmax=vmax, aspect="equal")
         ax.set_title(f"{nx}×{ny} − 64×64 (MPa)")
         plt.colorbar(im, ax=ax, shrink=0.8)
+
+    axes[2, 2].set_visible(False)
 
     plt.tight_layout()
     out = __import__("os").path.join(
