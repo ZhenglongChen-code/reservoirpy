@@ -58,7 +58,7 @@ N_SIM_STEPS = 200
 CG_TOLERANCE = 1e-8
 CG_MAXITER = 2000
 
-OUTPUT_ROOT = "/mnt/bn/zzl-lf/czl/Dataset"
+OUTPUT_ROOT = "/mnt/bn/zzl-lf/czl/Dataset/single_phase"
 
 
 def make_time_fractions(n: int) -> np.ndarray:

@@ -59,7 +59,7 @@ TOTAL_TIME_DAYS = 365.0
 TOTAL_TIME = uc.d_to_s(TOTAL_TIME_DAYS)
 N_SIM_STEPS = 200
 
-OUTPUT_ROOT = "/mnt/bn/zzl-lf/czl/Dataset"
+OUTPUT_ROOT = "/mnt/bn/zzl-lf/czl/Dataset/single_phase"
 
 
 def make_time_fractions(n: int) -> np.ndarray:
